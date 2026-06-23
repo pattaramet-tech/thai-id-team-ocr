@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { OCRPreview } from "./ocr-preview";
 
 interface Team {
   id: number;
@@ -61,6 +62,7 @@ export default function TeamDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [showOCR, setShowOCR] = useState(false);
   const [formData, setFormData] = useState({
     firstName: "",
     lastName: "",
@@ -138,6 +140,37 @@ export default function TeamDetailPage() {
     }
   };
 
+  const handleSaveFromOCR = async (data: {
+    firstName: string;
+    lastName: string;
+    dateOfBirth: string | null;
+    sourceFilename: string;
+    ocrText: string;
+    confidence: number;
+  }) => {
+    try {
+      const res = await fetch(`${API_BASE}/players`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          teamId,
+          firstName: data.firstName,
+          lastName: data.lastName,
+          dateOfBirth: data.dateOfBirth || undefined,
+          sourceFilename: data.sourceFilename,
+          ocrText: data.ocrText,
+          confidence: data.confidence,
+        }),
+      });
+
+      if (!res.ok) throw new Error("Failed to save player");
+      setShowOCR(false);
+      await fetchTeamAndPlayers();
+    } catch (err) {
+      throw err;
+    }
+  };
+
   if (loading) return <div className="p-8">Loading...</div>;
   if (!team) return <div className="p-8 text-red-600">Team not found</div>;
 
@@ -193,13 +226,21 @@ export default function TeamDetailPage() {
         )}
 
         {/* Add Player Form */}
-        <div className="mb-8">
-          <button
-            onClick={() => setShowForm(!showForm)}
-            className="rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
-          >
-            {showForm ? "Cancel" : "+ Add Player"}
-          </button>
+        <div className="mb-8 space-y-4">
+          <div className="flex gap-3">
+            <button
+              onClick={() => setShowForm(!showForm)}
+              className="rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
+            >
+              {showForm ? "Cancel" : "+ Add Player"}
+            </button>
+            <button
+              onClick={() => setShowOCR(!showOCR)}
+              className="rounded-lg bg-purple-600 px-4 py-2 text-white hover:bg-purple-700"
+            >
+              {showOCR ? "Close" : "📤 OCR Import"}
+            </button>
+          </div>
 
           {showForm && (
             <form onSubmit={handleAddPlayer} className="mt-4 rounded-lg bg-white p-6 shadow">
@@ -247,6 +288,15 @@ export default function TeamDetailPage() {
                 Add Player
               </button>
             </form>
+          )}
+
+          {showOCR && team && (
+            <OCRPreview
+              teamId={teamId}
+              teamAgeGroup={team.ageGroup}
+              onSave={handleSaveFromOCR}
+              onCancel={() => setShowOCR(false)}
+            />
           )}
         </div>
 
