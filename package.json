@@ -4,12 +4,15 @@
   "private": true,
   "description": "Thai ID Team OCR Exporter",
   "scripts": {
+    "install-all": "npm run web:install && npm run api:install",
     "web:install": "cd apps/web && npm install",
     "web:dev": "cd apps/web && npm run dev",
     "web:build": "cd apps/web && npm run build",
+    "web:lint": "cd apps/web && npm run lint",
     "api:install": "cd apps/api && python -m venv venv && .\\venv\\Scripts\\activate && pip install -r requirements.txt",
     "api:dev": "cd apps/api && .\\venv\\Scripts\\activate && python -m uvicorn app.main:app --reload --port 8000",
-    "install-all": "npm run web:install && npm run api:install",
-    "dev": "npm run api:dev"
+    "test": "cd apps/api && .\\venv\\Scripts\\activate && pytest tests/ -v",
+    "test:cov": "cd apps/api && .\\venv\\Scripts\\activate && pytest tests/ --cov=app",
+    "lint": "npm run web:lint"
   }
 }
