@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { OCRPreview } from "./ocr-preview";
+import { BatchUpload } from "./batch-upload";
 
 interface Team {
   id: number;
@@ -87,7 +88,7 @@ export default function TeamDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
-  const [showOCR, setShowOCR] = useState(false);
+  const [showOCR, setShowOCR] = useState<false | "single" | "batch">(false);
   const [editingPlayer, setEditingPlayer] = useState<Player | null>(null);
   const [duplicates, setDuplicates] = useState<Duplicate | null>(null);
   const [exporting, setExporting] = useState(false);
@@ -411,18 +412,24 @@ export default function TeamDetailPage() {
 
         {/* Add Player Form */}
         <div className="mb-8 space-y-4">
-          <div className="flex gap-3">
+          <div className="flex gap-3 flex-wrap">
             <button
               onClick={() => setShowForm(!showForm)}
               className="rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
             >
-              {showForm ? "Cancel" : "+ Add Player"}
+              {showForm ? "ยกเลิก" : "+ เพิ่มนักกีฬา"}
             </button>
             <button
-              onClick={() => setShowOCR(!showOCR)}
+              onClick={() => setShowOCR(showOCR === "single" ? false : "single")}
               className="rounded-lg bg-purple-600 px-4 py-2 text-white hover:bg-purple-700"
             >
-              {showOCR ? "Close" : "📤 OCR Import"}
+              {showOCR === "single" ? "ปิด" : "📤 อัปโหลดไฟล์เดี่ยว"}
+            </button>
+            <button
+              onClick={() => setShowOCR(showOCR === "batch" ? false : "batch")}
+              className="rounded-lg bg-indigo-600 px-4 py-2 text-white hover:bg-indigo-700"
+            >
+              {showOCR === "batch" ? "ปิด" : "📥 อัปโหลดหลายไฟล์"}
             </button>
           </div>
 
@@ -474,12 +481,19 @@ export default function TeamDetailPage() {
             </form>
           )}
 
-          {showOCR && team && (
+          {showOCR === "single" && team && (
             <OCRPreview
               teamId={teamId}
               teamAgeGroup={team.ageGroup}
               onSave={handleSaveFromOCR}
               onCancel={() => setShowOCR(false)}
+            />
+          )}
+
+          {showOCR === "batch" && (
+            <BatchUpload
+              teamId={teamId}
+              onItemsSaved={fetchTeamAndPlayers}
             />
           )}
         </div>
