@@ -45,10 +45,13 @@ export default function Home() {
               <p>Review and verify extracted names</p>
             </a>
 
-            <div className="block rounded-lg bg-gray-300 p-6 text-gray-600 cursor-not-allowed">
+            <a
+              href="/export"
+              className="block rounded-lg bg-blue-600 p-6 text-white hover:bg-blue-700 transition"
+            >
               <h3 className="text-xl font-semibold mb-2">Export XLSX</h3>
-              <p>Coming in Phase 3</p>
-            </div>
+              <p>Export verified players to Excel</p>
+            </a>
           </div>
         </div>
       </div>

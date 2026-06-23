@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import init_db
-from app.routes import teams, ocr, players
+from app.routes import teams, ocr, players, export
 
 app = FastAPI(title="Thai ID Team OCR API", version="0.1.0")
 
@@ -18,6 +18,7 @@ init_db()
 app.include_router(teams.router, prefix="/teams", tags=["teams"])
 app.include_router(ocr.router, prefix="/ocr", tags=["ocr"])
 app.include_router(players.router, prefix="/players", tags=["players"])
+app.include_router(export.router, prefix="/export", tags=["export"])
 
 @app.get("/health")
 async def health_check():
