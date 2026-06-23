@@ -1,34 +1,39 @@
 from pydantic import BaseModel
-from datetime import datetime
+from datetime import datetime, date
 from typing import Optional
 
 class PlayerCreate(BaseModel):
     teamId: int
-    firstName: Optional[str] = None
-    lastName: Optional[str] = None
-    fullName: Optional[str] = None
-    sourceFilename: str
+    firstName: str  # Required for Phase 1
+    lastName: str  # Required for Phase 1
+    dateOfBirth: Optional[date] = None
+    sourceFilename: Optional[str] = None
     ocrText: Optional[str] = None
     confidence: float = 0.0
 
 class PlayerUpdate(BaseModel):
     firstName: Optional[str] = None
     lastName: Optional[str] = None
-    fullName: Optional[str] = None
+    dateOfBirth: Optional[date] = None
     status: Optional[str] = None
     verifiedAt: Optional[datetime] = None
 
 class PlayerResponse(BaseModel):
     id: int
     teamId: int
-    firstName: Optional[str]
-    lastName: Optional[str]
+    firstName: str
+    lastName: str
     fullName: Optional[str]
-    sourceFilename: str
+    dateOfBirth: Optional[date]
+    birthYearBE: Optional[int]
+    eligibilityStatus: str
+    eligibilityNote: Optional[str]
+    sourceFilename: Optional[str]
     ocrText: Optional[str]
     confidence: float
     status: str
     createdAt: datetime
+    updatedAt: datetime
     verifiedAt: Optional[datetime]
 
     class Config:
