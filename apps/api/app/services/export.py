@@ -13,26 +13,20 @@ class ExportService:
     def detect_duplicates(players: List[Dict]) -> Dict[str, List[Dict]]:
         """
         Detect duplicate full names within the same team.
-        Returns dict mapping team_id to list of duplicate player groups.
+        Returns dict mapping full_name to list of duplicate players.
         """
-        duplicates_by_team = {}
+        # Group players by full name
+        name_groups = {}
+        for player in players:
+            full_name = player.get("fullName") or f"{player.get('firstName', '')} {player.get('lastName', '')}".strip()
+            if full_name:
+                if full_name not in name_groups:
+                    name_groups[full_name] = []
+                name_groups[full_name].append(player)
 
-        for team_id, team_players in {}.items():
-            # Group players by full name
-            name_groups = {}
-            for player in team_players:
-                full_name = player.get("fullName") or f"{player.get('firstName', '')} {player.get('lastName', '')}"
-                if full_name.strip():
-                    if full_name not in name_groups:
-                        name_groups[full_name] = []
-                    name_groups[full_name].append(player)
-
-            # Keep only duplicates
-            duplicates = {name: group for name, group in name_groups.items() if len(group) > 1}
-            if duplicates:
-                duplicates_by_team[team_id] = duplicates
-
-        return duplicates_by_team
+        # Keep only duplicates
+        duplicates = {name: group for name, group in name_groups.items() if len(group) > 1}
+        return duplicates
 
     @staticmethod
     def create_xlsx(
@@ -64,10 +58,17 @@ class ExportService:
                 "Team",
                 "Age Group",
                 "Gender",
+                "Division",
+                "Competition Year",
                 "First Name",
                 "Last Name",
                 "Full Name",
+                "Date of Birth",
+                "Birth Year (BE)",
+                "Eligibility Status",
+                "Eligibility Note",
                 "Source File",
+                "Player Status",
                 "Verified Date",
             ]
 
@@ -90,30 +91,47 @@ class ExportService:
 
             # Add data rows
             for idx, player in enumerate(players, 1):
+                dob = player.get("dateOfBirth")
+                dob_str = dob.isoformat() if isinstance(dob, object) and hasattr(dob, 'isoformat') else (str(dob) if dob else "")
+
                 row_data = [
                     idx,
                     team_name,
                     team_age_group,
                     team_gender,
+                    team_data.get("division") or "",
+                    team_data.get("competitionYearBE") or "",
                     player.get("firstName") or "",
                     player.get("lastName") or "",
                     player.get("fullName") or "",
+                    dob_str,
+                    player.get("birthYearBE") or "",
+                    player.get("eligibilityStatus") or "unknown",
+                    player.get("eligibilityNote") or "",
                     player.get("sourceFilename") or "",
+                    player.get("status") or "pending",
                     player.get("verifiedAt", "")[:10] if player.get("verifiedAt") else "",
                 ]
                 sheet.append(row_data)
 
             # Set column widths
             column_widths = {
-                "A": 5,   # No
-                "B": 15,  # Team
-                "C": 12,  # Age Group
-                "D": 12,  # Gender
-                "E": 15,  # First Name
-                "F": 15,  # Last Name
-                "G": 25,  # Full Name
-                "H": 20,  # Source File
-                "I": 15,  # Verified Date
+                "A": 5,    # No
+                "B": 15,   # Team
+                "C": 12,   # Age Group
+                "D": 12,   # Gender
+                "E": 12,   # Division
+                "F": 15,   # Competition Year
+                "G": 15,   # First Name
+                "H": 15,   # Last Name
+                "I": 25,   # Full Name
+                "J": 15,   # Date of Birth
+                "K": 12,   # Birth Year (BE)
+                "L": 15,   # Eligibility Status
+                "M": 30,   # Eligibility Note
+                "N": 20,   # Source File
+                "O": 12,   # Player Status
+                "P": 15,   # Verified Date
             }
 
             for col_letter, width in column_widths.items():
@@ -184,12 +202,19 @@ class ExportService:
                     "name": team.name,
                     "ageGroup": team.ageGroup,
                     "gender": team.gender,
+                    "division": team.division,
+                    "competitionYearBE": team.competitionYearBE,
                     "players": [
                         {
                             "firstName": p.firstName,
                             "lastName": p.lastName,
                             "fullName": p.fullName,
+                            "dateOfBirth": p.dateOfBirth.isoformat() if p.dateOfBirth else None,
+                            "birthYearBE": p.birthYearBE,
+                            "eligibilityStatus": p.eligibilityStatus,
+                            "eligibilityNote": p.eligibilityNote,
                             "sourceFilename": p.sourceFilename,
+                            "status": p.status,
                             "verifiedAt": p.verifiedAt.isoformat() if p.verifiedAt else None,
                         }
                         for p in players_by_team[team.id]

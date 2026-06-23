@@ -38,22 +38,44 @@ async def get_team(team_id: int, db: Session = Depends(get_db)):
 
 @router.patch("/{team_id}", response_model=TeamResponse)
 async def update_team(team_id: int, team_update: TeamUpdate, db: Session = Depends(get_db)):
+    from app.services.eligibility import check_eligibility_for_player
+
     db_team = db.query(Team).filter(Team.id == team_id).first()
     if not db_team:
         raise HTTPException(status_code=404, detail="Team not found")
+
+    # Track if eligibility-affecting fields changed
+    eligibility_fields_changed = False
 
     if team_update.name is not None:
         if not team_update.name.strip():
             raise HTTPException(status_code=400, detail="Team name cannot be empty")
         db_team.name = team_update.name
     if team_update.ageGroup is not None:
+        if db_team.ageGroup != team_update.ageGroup:
+            eligibility_fields_changed = True
         db_team.ageGroup = team_update.ageGroup
     if team_update.gender is not None:
         db_team.gender = team_update.gender
     if team_update.division is not None:
         db_team.division = team_update.division
     if team_update.competitionYearBE is not None:
+        if db_team.competitionYearBE != team_update.competitionYearBE:
+            eligibility_fields_changed = True
         db_team.competitionYearBE = team_update.competitionYearBE
+
+    # Recalculate eligibility for all players if team fields changed
+    if eligibility_fields_changed:
+        from app.models import Player
+        players = db.query(Player).filter(Player.teamId == team_id).all()
+        for player in players:
+            result = check_eligibility_for_player(
+                db_team.ageGroup,
+                db_team.competitionYearBE,
+                player.dateOfBirth
+            )
+            player.eligibilityStatus = result["status"]
+            player.eligibilityNote = result["note"]
 
     db.commit()
     db.refresh(db_team)
