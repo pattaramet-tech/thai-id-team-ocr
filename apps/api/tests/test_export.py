@@ -69,12 +69,19 @@ class TestXLSXGeneration:
                 "name": "Team A",
                 "ageGroup": "U18",
                 "gender": "Male",
+                "division": None,
+                "competitionYearBE": 2569,
                 "players": [
                     {
                         "firstName": "สมชาย",
                         "lastName": "วิชัยกุล",
                         "fullName": "สมชาย วิชัยกุล",
+                        "dateOfBirth": None,
+                        "birthYearBE": None,
+                        "eligibilityStatus": "eligible",
+                        "eligibilityNote": None,
                         "sourceFilename": "image1.jpg",
+                        "status": "verified",
                         "verifiedAt": "2024-01-15T10:30:00",
                     }
                 ]
@@ -88,7 +95,7 @@ class TestXLSXGeneration:
 
         # Verify filename format
         assert filename.endswith(".xlsx")
-        assert "Team A" in filename or "Team" in filename
+        assert "verified_players" in filename
 
         # Verify file can be loaded as Excel
         wb = load_workbook(output)
@@ -214,15 +221,40 @@ class TestXLSXGeneration:
                 "name": "Team A",
                 "ageGroup": "U18",
                 "gender": "Male",
+                "division": None,
+                "competitionYearBE": 2569,
                 "players": []
+            },
+            {
+                "id": 2,
+                "name": "Team B",
+                "ageGroup": "U18",
+                "gender": "Female",
+                "division": None,
+                "competitionYearBE": 2569,
+                "players": [
+                    {
+                        "firstName": "สมชาย",
+                        "lastName": "วิชัยกุล",
+                        "fullName": "สมชาย วิชัยกุล",
+                        "dateOfBirth": None,
+                        "birthYearBE": None,
+                        "eligibilityStatus": "eligible",
+                        "eligibilityNote": None,
+                        "sourceFilename": "image1.jpg",
+                        "status": "verified",
+                        "verifiedAt": "2024-01-15T10:30:00",
+                    }
+                ]
             }
         ]
 
         output, _ = ExportService.create_xlsx(teams_data)
         wb = load_workbook(output)
 
-        # Empty teams should be skipped
-        assert len(wb.sheetnames) <= 1
+        # Empty Team A should be skipped, only Team B sheet should exist
+        assert len(wb.sheetnames) == 1
+        assert "Team B" in wb.sheetnames
 
     def test_create_xlsx_column_widths(self):
         """Should set appropriate column widths."""
@@ -264,7 +296,9 @@ class TestFormatExportData:
                 "id": 1,
                 "name": "Team A",
                 "ageGroup": "U18",
-                "gender": "Male"
+                "gender": "Male",
+                "division": None,
+                "competitionYearBE": 2569
             })()
         ]
 
@@ -275,7 +309,12 @@ class TestFormatExportData:
                 "firstName": "สมชาย",
                 "lastName": "วิชัยกุล",
                 "fullName": "สมชาย วิชัยกุล",
+                "dateOfBirth": None,
+                "birthYearBE": None,
+                "eligibilityStatus": "eligible",
+                "eligibilityNote": None,
                 "sourceFilename": "image1.jpg",
+                "status": "verified",
                 "verifiedAt": None,
             })()
         ]

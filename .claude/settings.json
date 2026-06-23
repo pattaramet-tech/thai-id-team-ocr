@@ -17,7 +17,14 @@
       "Bash(git commit -m 'docs: Add phase tracking and development timeline *)",
       "Bash(git push *)",
       "Bash(git branch *)",
-      "Bash(git commit -m 'docs: Add comprehensive GitHub workflow setup guide *)"
+      "Bash(git commit -m 'docs: Add comprehensive GitHub workflow setup guide *)",
+      "Bash(git checkout *)",
+      "Bash(python -m pytest tests/test_eligibility.py -v)",
+      "Bash(python -m pytest tests/test_ocr_hardening.py -v)",
+      "PowerShell(pip install pytest fastapi sqlalchemy pydantic pydantic-settings python-dotenv -q 2>&1)",
+      "PowerShell(pip install pytesseract opencv-python openpyxl -q)",
+      "PowerShell(pip install httpx -q)",
+      "PowerShell(pip install python-multipart -q)"
     ]
   }
 }

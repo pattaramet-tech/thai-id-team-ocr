@@ -56,7 +56,7 @@ class TestThaiNameExtraction:
         assert last == "ศรีวิทยา"
 
     def test_extract_with_nak_sao_prefix(self):
-        # Pattern: นางสาว <first> <last>
+        # Pattern: นางสาว <first> <last> (must not match partial "นาง")
         ocr_text = "นางสาว ฉัตรวิภา คำวัฒนา"
         first, last = OCRService.extract_thai_names(ocr_text)
         assert first == "ฉัตรวิภา"
@@ -69,12 +69,50 @@ class TestThaiNameExtraction:
         assert first == "สมศักดิ์"
         assert last == "เทพเมืองไทย"
 
+    def test_extract_with_dek_ying_prefix(self):
+        # Pattern: เด็กหญิง <first> <last>
+        ocr_text = "เด็กหญิง นรีนุช สถิตศิล"
+        first, last = OCRService.extract_thai_names(ocr_text)
+        assert first == "นรีนุช"
+        assert last == "สถิตศิล"
+
+    def test_extract_from_labeled_lines_name_surname(self):
+        # Pattern: ชื่อ <first> \n นามสกุล <last>
+        ocr_text = "ชื่อ สมชาย\nนามสกุล วิชัยกุล"
+        first, last = OCRService.extract_thai_names(ocr_text)
+        assert first == "สมชาย"
+        assert last == "วิชัยกุล"
+
+    def test_extract_from_name_and_surname_together(self):
+        # Pattern: ชื่อตัวและชื่อสกุล นาย <first> <last>
+        ocr_text = "ชื่อตัวและชื่อสกุล นาย เกียรติศักดิ์ ใจสนุก"
+        first, last = OCRService.extract_thai_names(ocr_text)
+        assert first == "เกียรติศักดิ์"
+        assert last == "ใจสนุก"
+
     def test_extract_with_title_and_redaction(self):
         # Include ID number to test redaction happens first
         ocr_text = "นาย สมชาย วิชัยกุล\nเลข 1234567890123"
         first, last = OCRService.extract_thai_names(ocr_text)
         assert first == "สมชาย"
         assert last == "วิชัยกุล"
+
+    def test_avoid_noise_words(self):
+        # Should not extract document header as name
+        ocr_text = "บัตรประจำตัวประชาชน Thai National ID Card\nนาย สมชาย วิชัยกุล"
+        first, last = OCRService.extract_thai_names(ocr_text)
+        assert first == "สมชาย"
+        assert last == "วิชัยกุล"
+        assert "บัตร" not in (first or "")
+        assert "ประชาชน" not in (last or "")
+
+    def test_partial_match_prevention(self):
+        # Pattern: "นาง" should not match when "นางสาว" is present
+        ocr_text = "นางสาว นรีนุช สถิตศิล"
+        first, last = OCRService.extract_thai_names(ocr_text)
+        assert first == "นรีนุช"
+        assert last == "สถิตศิล"
+        # Verify we didn't get "สาว" as firstname (from partial นาง match)
 
 
 class TestDateExtraction:

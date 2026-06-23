@@ -68,53 +68,120 @@ class OCRService:
         return text
 
     @staticmethod
+    def _is_noise_word(word: str) -> bool:
+        """Check if word is likely document noise, not a name."""
+        noise_keywords = {
+            'บัตร', 'ประจำตัว', 'ประชาชน', 'เลข', 'เกิด', 'วันที่', 'ชื่อ',
+            'นามสกุล', 'สัญชาติ', 'สถานที่', 'ที่อยู่', 'id', 'card', 'name',
+            'birth', 'date', 'thai', 'national', 'copy', 'สำเนา', 'บ้าน',
+            'เบอร์', 'หมายเลข', 'ลงชื่อ', 'ผู้', 'องค์', 'การ', 'ระบบ'
+        }
+        word_lower = word.lower()
+        return word_lower in noise_keywords or len(word) < 2
+
+    @staticmethod
+    def _extract_from_labeled_lines(lines: List[str]) -> Tuple[Optional[str], Optional[str]]:
+        """Extract names from labeled lines like 'ชื่อ <name>' and 'นามสกุล <name>'."""
+        first_name = None
+        last_name = None
+
+        for line in lines:
+            # Pattern: ชื่อ <name> or ชื่อตัวและชื่อสกุล <first> <last>
+            if 'ชื่อ' in line:
+                remaining = line.replace('ชื่อตัวและชื่อสกุล', '').replace('ชื่อ', '').strip()
+                if remaining:
+                    # Remove title if present
+                    for title in ['นาย', 'นาง', 'นางสาว', 'เด็กชาย', 'เด็กหญิง']:
+                        remaining = remaining.replace(title, '').strip()
+
+                    parts = [p.strip() for p in remaining.split() if p.strip() and not OCRService._is_noise_word(p)]
+                    if len(parts) >= 2:
+                        first_name = parts[0]
+                        last_name = parts[1]
+                        return first_name, last_name
+                    elif len(parts) == 1 and not first_name:
+                        first_name = parts[0]
+
+            # Pattern: นามสกุล <name>
+            if 'นามสกุล' in line:
+                remaining = line.replace('นามสกุล', '').strip()
+                if remaining:
+                    parts = [p.strip() for p in remaining.split() if p.strip() and not OCRService._is_noise_word(p)]
+                    if parts:
+                        last_name = parts[0]
+
+        return first_name, last_name
+
+    @staticmethod
+    def _extract_from_title_pattern(line: str) -> Tuple[Optional[str], Optional[str]]:
+        """Extract names from title patterns like 'นาย <first> <last>'."""
+        # Order titles from longest to shortest to avoid partial matches
+        titles_ordered = [
+            'เด็กหญิง', 'เด็กชาย', 'นางสาว', 'ด.ญ.', 'ด.ช.', 'นาย', 'นาง'
+        ]
+
+        for title in titles_ordered:
+            if title in line:
+                # Find the position after the title
+                idx = line.find(title)
+                remaining = line[idx + len(title):].strip()
+
+                # Filter out noise words
+                parts = [
+                    p.strip() for p in remaining.split()
+                    if p.strip() and not OCRService._is_noise_word(p)
+                ]
+
+                if len(parts) >= 2:
+                    return parts[0], parts[1]
+                elif len(parts) == 1:
+                    return parts[0], None
+
+        return None, None
+
+    @staticmethod
     def extract_thai_names(ocr_text: str) -> Tuple[Optional[str], Optional[str]]:
         """
         Extract Thai first name and surname from OCR text.
-        Looks for patterns like:
+        Handles patterns:
         - นาย <first> <last>
         - นางสาว <first> <last>
         - เด็กชาย <first> <last>
+        - ชื่อ <first> / นามสกุล <last>
+        - ชื่อตัวและชื่อสกุล <first> <last>
         """
         text = OCRService.redact_thai_id_numbers(ocr_text)
         text = text.strip()
         lines = [line.strip() for line in text.split('\n') if line.strip()]
 
-        first_name = None
-        last_name = None
+        # Try labeled lines first (ชื่อ / นามสกุล patterns)
+        first_name, last_name = OCRService._extract_from_labeled_lines(lines)
+        if first_name or last_name:
+            return first_name, last_name
 
-        # Thai titles
-        titles = ['นาย', 'นาง', 'นางสาว', 'เด็กชาย', 'เด็กหญิง', 'ด.ญ.', 'ด.ช.']
-
+        # Try title patterns
         for line in lines:
-            # Check for title patterns
-            for title in titles:
-                if title in line:
-                    # Remove title and get names
-                    remaining = line.replace(title, '').strip()
-                    parts = remaining.split()
-                    if len(parts) >= 2:
-                        first_name = parts[0]
-                        last_name = parts[1]
-                        return first_name, last_name
-                    elif len(parts) == 1:
-                        first_name = parts[0]
+            fname, lname = OCRService._extract_from_title_pattern(line)
+            if fname or lname:
+                return fname, lname
 
-        # Fallback: look for Thai characters
+        # Fallback: look for Thai characters only (avoid noise)
         thai_words = []
         for line in lines:
-            if any('฀' <= char <= '๿' for char in line):
-                # Split line into words
-                words = line.split()
-                thai_words.extend(words)
+            # Check if line has Thai characters
+            has_thai = any('฀' <= char <= '๿' for char in line)
+            if has_thai:
+                words = [w.strip() for w in line.split() if w.strip()]
+                # Filter noise words
+                clean_words = [w for w in words if not OCRService._is_noise_word(w)]
+                thai_words.extend(clean_words)
 
         if len(thai_words) >= 2:
-            first_name = thai_words[0]
-            last_name = thai_words[1]
+            return thai_words[0], thai_words[1]
         elif len(thai_words) == 1:
-            first_name = thai_words[0]
+            return thai_words[0], None
 
-        return first_name, last_name
+        return None, None
 
     @staticmethod
     def extract_date_of_birth(ocr_text: str) -> Optional[date]:

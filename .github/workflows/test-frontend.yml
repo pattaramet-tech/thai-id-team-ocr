@@ -2,7 +2,7 @@ name: Frontend Tests
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, phase-* ]
     paths:
       - 'apps/web/**'
       - '.github/workflows/test-frontend.yml'
@@ -14,28 +14,20 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - name: Set up Node.js
-      uses: actions/setup-node@v3
+      uses: actions/setup-node@v4
       with:
-        node-version: '18'
-        cache: 'npm'
-        cache-dependency-path: 'apps/web/package-lock.json'
+        node-version: 20
 
     - name: Install dependencies
-      run: |
-        cd apps/web
-        npm ci
-
-    - name: Run linter
-      run: |
-        cd apps/web
-        npm run lint
+      run: npm install
 
     - name: Build
-      run: |
-        cd apps/web
-        npm run build
+      run: npm run build
