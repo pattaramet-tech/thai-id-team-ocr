@@ -24,6 +24,9 @@ async def export_team(team_id: int, db: Session = Depends(get_db)):
             Player.status == "verified"
         ).all()
 
+        if not players:
+            raise HTTPException(status_code=400, detail="No verified players in this team to export")
+
         # Format data for export
         teams_data = ExportService.format_export_data([team], players)
 

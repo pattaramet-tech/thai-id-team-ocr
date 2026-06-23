@@ -124,7 +124,10 @@ async def update_player(
         player.status = player_update.status
         if player_update.status == "verified":
             player.verifiedAt = datetime.utcnow()
+        elif player_update.status in ("rejected", "pending"):
+            player.verifiedAt = None
 
+    player.updatedAt = datetime.utcnow()
     db.commit()
     db.refresh(player)
     return player
