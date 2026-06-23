@@ -29,15 +29,21 @@ export default function Home() {
               <p>Create and manage competition teams</p>
             </a>
 
-            <div className="block rounded-lg bg-gray-300 p-6 text-gray-600 cursor-not-allowed">
+            <a
+              href="/ocr"
+              className="block rounded-lg bg-blue-600 p-6 text-white hover:bg-blue-700 transition"
+            >
               <h3 className="text-xl font-semibold mb-2">Upload & OCR</h3>
-              <p>Coming in Phase 2</p>
-            </div>
+              <p>Upload images and extract names automatically</p>
+            </a>
 
-            <div className="block rounded-lg bg-gray-300 p-6 text-gray-600 cursor-not-allowed">
+            <a
+              href="/review"
+              className="block rounded-lg bg-blue-600 p-6 text-white hover:bg-blue-700 transition"
+            >
               <h3 className="text-xl font-semibold mb-2">Review Players</h3>
-              <p>Coming in Phase 2</p>
-            </div>
+              <p>Review and verify extracted names</p>
+            </a>
 
             <div className="block rounded-lg bg-gray-300 p-6 text-gray-600 cursor-not-allowed">
               <h3 className="text-xl font-semibold mb-2">Export XLSX</h3>

@@ -8,7 +8,8 @@
       "Bash(cd /c/claude-workspace/thai-id-team-ocr && ls -la)",
       "Read(//c/c/claude-workspace/**)",
       "Bash(git add *)",
-      "Bash(git reset *)"
+      "Bash(git reset *)",
+      "Bash(git commit -m ' *)"
     ]
   }
 }
