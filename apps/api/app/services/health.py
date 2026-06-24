@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Dict, Any
 from sqlalchemy.orm import Session
 from app.models import Team, Player, AuditLog
+from app.version import APP_VERSION
 
 
 class HealthService:
@@ -171,7 +172,7 @@ class HealthService:
         temp_size = HealthService.get_directory_size("temp")
 
         return {
-            "version": "0.5.0",
+            "version": APP_VERSION,
             "database": HealthService.check_database(db),
             "directories": dirs,
             "tesseract": HealthService.check_tesseract(),

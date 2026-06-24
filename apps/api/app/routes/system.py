@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Header
+from fastapi import APIRouter, Depends, HTTPException, status, Header, Query
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from app.database import get_db
@@ -53,18 +53,26 @@ def require_admin(user: User = Depends(get_current_user_from_header)) -> User:
 
 
 @router.get("/system/health")
-async def get_health(db: Session = Depends(get_db)):
-    """Get system health status."""
+async def get_health(
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db)
+):
+    """Get detailed system health status (admin only)."""
     return HealthService.get_system_health(db)
 
 
 @router.post("/backup/create")
 async def create_backup(
     admin: User = Depends(require_admin),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    include_exports: bool = Query(False, description="Include exports directory in backup")
 ):
     """Create a backup (admin only)."""
-    result = BackupService.create_backup(db, actor_name=admin.display_name)
+    result = BackupService.create_backup(
+        db,
+        actor_name=admin.display_name,
+        include_exports=include_exports
+    )
     if result["success"]:
         return result
     raise HTTPException(status_code=500, detail=result.get("error", "Backup failed"))
