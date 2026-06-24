@@ -37,6 +37,42 @@ class TestIDRedaction:
         assert result == "[REDACTED_ID]"
 
 
+class TestTitleRemoval:
+    """Test Thai title removal helper."""
+
+    def test_remove_nay_title(self):
+        """Remove นาย title."""
+        result = OCRService._remove_thai_title("นาย สมชาย")
+        assert result == "สมชาย"
+
+    def test_remove_nang_title(self):
+        """Remove นาง title."""
+        result = OCRService._remove_thai_title("นาง มาลี")
+        assert result == "มาลี"
+
+    def test_remove_nang_sao_title(self):
+        """Remove นางสาว title (longest first)."""
+        result = OCRService._remove_thai_title("นางสาว ฉัตรวิภา")
+        assert result == "ฉัตรวิภา"
+        # Should not leave "สาว" behind
+        assert "สาว" not in result or result == "สาว"
+
+    def test_remove_dek_ying_title(self):
+        """Remove เด็กหญิง title."""
+        result = OCRService._remove_thai_title("เด็กหญิง มาลี")
+        assert result == "มาลี"
+
+    def test_remove_dek_chai_title(self):
+        """Remove เด็กชาย title."""
+        result = OCRService._remove_thai_title("เด็กชาย สมชาย")
+        assert result == "สมชาย"
+
+    def test_no_title_returns_same(self):
+        """Text without title returns same."""
+        result = OCRService._remove_thai_title("สมชาย วิชัย")
+        assert result == "สมชาย วิชัย"
+
+
 class TestThaiNameExtraction:
     """Test Thai name extraction from OCR text."""
 
@@ -101,6 +137,27 @@ class TestOCRServiceIntegration:
     def test_whitespace_handling(self):
         """Should handle leading/trailing whitespace."""
         ocr_text = "  สมชาย  \n  วิชัยกุล  \n  "
+        first, last = OCRService.extract_thai_names(ocr_text)
+        assert first == "สมชาย"
+        assert last == "วิชัยกุล"
+
+    def test_extract_labeled_line_with_nang_sao(self):
+        """Extract from labeled line with นางสาว title."""
+        ocr_text = "ชื่อตัวและชื่อสกุล นางสาว ฉัตรวิภา คำวัฒนา"
+        first, last = OCRService.extract_thai_names(ocr_text)
+        assert first == "ฉัตรวิภา"
+        assert last == "คำวัฒนา"
+
+    def test_extract_labeled_line_with_dek_ying(self):
+        """Extract from labeled line with เด็กหญิง title."""
+        ocr_text = "ชื่อตัวและชื่อสกุล เด็กหญิง มาลี ใจดี"
+        first, last = OCRService.extract_thai_names(ocr_text)
+        assert first == "มาลี"
+        assert last == "ใจดี"
+
+    def test_extract_labeled_line_separate_fields(self):
+        """Extract from separate ชื่อ and นามสกุล fields with title."""
+        ocr_text = "ชื่อ นาย สมชาย\nนามสกุล วิชัยกุล"
         first, last = OCRService.extract_thai_names(ocr_text)
         assert first == "สมชาย"
         assert last == "วิชัยกุล"

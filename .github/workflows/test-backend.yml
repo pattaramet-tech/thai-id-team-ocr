@@ -29,7 +29,7 @@ jobs:
     - name: Install system dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y build-essential tesseract-ocr tesseract-ocr-tha libgl1 libglib2.0-0
+        sudo apt-get install -y build-essential tesseract-ocr tesseract-ocr-tha libgl1 libglib2.0-0 poppler-utils
 
     - name: Install Python dependencies
       run: |
