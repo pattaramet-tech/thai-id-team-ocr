@@ -49,7 +49,10 @@
       "Bash(python -m pytest tests/test_auth.py::TestAuthService::test_hash_and_verify_password -v)",
       "Bash(python -c \"from argon2 import PasswordHasher; print\\('Argon2 installed'\\)\")",
       "Bash(python -m pytest tests/test_system.py -v)",
-      "Bash(python -m pytest tests/test_system.py::TestBackupService::test_create_backup -v)"
+      "Bash(python -m pytest tests/test_system.py::TestBackupService::test_create_backup -v)",
+      "Bash(cd /d c:\\\\claude-workspace\\\\thai-id-team-ocr)",
+      "Bash(python -m pytest apps/api/tests/ -v --tb=short)",
+      "PowerShell(npm --version)"
     ]
   }
 }
