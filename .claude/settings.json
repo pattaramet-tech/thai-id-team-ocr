@@ -42,7 +42,12 @@
       "Bash(python -m pytest tests/test_ocr.py -k \"labeled\" -v)",
       "Bash(python -m pytest tests/ -v)",
       "Bash(python -m pytest tests/test_ocr.py::TestTitleRemoval::test_remove_nay_title -v)",
-      "Bash(python -m pytest tests/test_audit.py -v)"
+      "Bash(python -m pytest tests/test_audit.py -v)",
+      "Bash(python -c \"from app.main import app; print\\('App loaded successfully'\\)\")",
+      "Bash(python -c \"from app.main import app; print\\('✓ App loaded successfully'\\)\")",
+      "Bash(python -m pytest tests/test_auth.py -v)",
+      "Bash(python -m pytest tests/test_auth.py::TestAuthService::test_hash_and_verify_password -v)",
+      "Bash(python -c \"from argon2 import PasswordHasher; print\\('Argon2 installed'\\)\")"
     ]
   }
 }
