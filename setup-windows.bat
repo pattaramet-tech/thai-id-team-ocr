@@ -22,12 +22,21 @@ REM Check Python
 echo Checking Python...
 python --version >nul 2>&1
 if errorlevel 1 (
+    echo.
+    echo ========================================
     echo ERROR: Python not found!
-    echo Please install Python 3.8+ from https://www.python.org/
-    echo Make sure to check "Add Python to PATH" during installation
+    echo ========================================
+    echo.
+    echo Please install Python 3.8+ from:
+    echo   https://www.python.org/
+    echo.
+    echo IMPORTANT: Check "Add Python to PATH" during installation
+    echo Then restart this script.
+    echo.
     pause
     exit /b 1
 )
+echo Python version:
 python --version
 echo.
 
@@ -35,12 +44,23 @@ REM Check Node.js
 echo Checking Node.js...
 node --version >nul 2>&1
 if errorlevel 1 (
+    echo.
+    echo ========================================
     echo ERROR: Node.js not found!
-    echo Please install Node.js from https://nodejs.org/
+    echo ========================================
+    echo.
+    echo Please install Node.js from:
+    echo   https://nodejs.org/
+    echo.
+    echo Install the LTS version and add to PATH.
+    echo Then restart this script.
+    echo.
     pause
     exit /b 1
 )
+echo Node.js version:
 node --version
+echo npm version:
 npm --version
 echo.
 
@@ -67,10 +87,20 @@ if not exist ".venv" (
     echo Creating Python virtual environment...
     python -m venv .venv
     if errorlevel 1 (
+        echo.
+        echo ========================================
         echo ERROR: Failed to create virtual environment
+        echo ========================================
+        echo.
+        echo Please check:
+        echo   1. Python is installed correctly
+        echo   2. Run "python --version" in Command Prompt
+        echo   3. Check disk space in apps/api folder
+        echo.
         pause
         exit /b 1
     )
+    echo Virtual environment created
     echo.
 )
 
@@ -89,11 +119,28 @@ echo Installing Python dependencies...
 echo (This may take 2-5 minutes)
 pip install -q -r requirements.txt
 if errorlevel 1 (
+    echo.
+    echo ========================================
     echo ERROR: Failed to install Python dependencies
-    pause
-    exit /b 1
+    echo ========================================
+    echo.
+    echo Trying to upgrade pip first...
+    python -m pip install --upgrade pip
+    echo.
+    echo Retrying pip install...
+    pip install -r requirements.txt
+    if errorlevel 1 (
+        echo.
+        echo Installation failed again. Please:
+        echo   1. Check internet connection
+        echo   2. Run: python -m pip install --upgrade pip
+        echo   3. Run: pip install -r requirements.txt
+        echo.
+        pause
+        exit /b 1
+    )
 )
-echo  Installed requirements.txt
+echo Python dependencies installed
 echo.
 
 REM Deactivate venv (we'll activate it during startup)
@@ -112,10 +159,21 @@ echo Installing Node.js dependencies...
 echo (This may take 2-5 minutes)
 call npm install
 if errorlevel 1 (
+    echo.
+    echo ========================================
     echo ERROR: Failed to install Node.js dependencies
+    echo ========================================
+    echo.
+    echo Please check:
+    echo   1. Internet connection is working
+    echo   2. Node.js is properly installed
+    echo   3. Run: npm cache clean --force
+    echo   4. Run: npm install again
+    echo.
     pause
     exit /b 1
 )
+echo Node.js dependencies installed
 echo.
 
 cd ..\..

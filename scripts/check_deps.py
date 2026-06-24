@@ -6,6 +6,9 @@ import sys
 import os
 from pathlib import Path
 
+# Check for command-line arguments
+STRICT_STARTUP = "--strict-startup" in sys.argv
+
 class DependencyChecker:
     """Check system dependencies."""
 
@@ -143,7 +146,10 @@ class DependencyChecker:
             self._log_ok("Python venv found: apps/api/.venv")
             return True
         else:
-            self._log_warn("Python venv not found - run setup-windows.bat first")
+            if STRICT_STARTUP:
+                self._log_error("Python venv not found - run setup-windows.bat first")
+            else:
+                self._log_warn("Python venv not found - run setup-windows.bat first")
             return False
 
     def check_node_modules(self) -> bool:
@@ -153,7 +159,10 @@ class DependencyChecker:
             self._log_ok("Node modules found: apps/web/node_modules")
             return True
         else:
-            self._log_warn("Node modules not found - run setup-windows.bat first")
+            if STRICT_STARTUP:
+                self._log_error("Node modules not found - run setup-windows.bat first")
+            else:
+                self._log_warn("Node modules not found - run setup-windows.bat first")
             return False
 
     def check_folders(self) -> bool:

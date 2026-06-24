@@ -18,12 +18,34 @@ if not exist "apps\api" (
     exit /b 1
 )
 
-REM Run dependency check
+REM Pre-check: venv exists
+if not exist "apps\api\.venv\Scripts\activate.bat" (
+    echo ERROR: Python virtual environment not found!
+    echo.
+    echo Setup is incomplete. Please run:
+    echo   setup-windows.bat
+    echo.
+    pause
+    exit /b 1
+)
+
+REM Pre-check: node_modules exists
+if not exist "apps\web\node_modules" (
+    echo ERROR: Node.js modules not found!
+    echo.
+    echo Setup is incomplete. Please run:
+    echo   setup-windows.bat
+    echo.
+    pause
+    exit /b 1
+)
+
+REM Run dependency check (strict mode for startup)
 echo Checking dependencies...
-python scripts/check_deps.py
+python scripts/check_deps.py --strict-startup
 if errorlevel 1 (
     echo.
-    echo ERROR: Dependencies missing!
+    echo ERROR: Critical dependencies missing!
     echo Please run: setup-windows.bat
     pause
     exit /b 1
