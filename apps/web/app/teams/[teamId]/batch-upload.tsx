@@ -18,11 +18,20 @@ interface OCRBatchItem {
   warnings?: string[];
 }
 
+interface FuzzyDuplicate {
+  candidateName: string;
+  matchedPlayerId: number;
+  matchedFullName: string;
+  similarity: number;
+  reason: string;
+}
+
 interface QueueItem extends OCRBatchItem {
   id: string; // temporary id for UI
   editedFirstName: string;
   editedLastName: string;
   editedDOB: string;
+  fuzzyDuplicates?: FuzzyDuplicate[];
 }
 
 interface BatchUploadProps {
@@ -52,6 +61,8 @@ const EligibilityBadge = ({ status }: { status?: string }) => {
   );
 };
 
+type FilterType = "all" | "complete" | "warnings" | "over_age" | "duplicates";
+
 export function BatchUpload({ teamId, onItemsSaved }: BatchUploadProps) {
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -59,6 +70,24 @@ export function BatchUpload({ teamId, onItemsSaved }: BatchUploadProps) {
   const [error, setError] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showOCRText, setShowOCRText] = useState<Set<string>>(new Set());
+  const [filter, setFilter] = useState<FilterType>("all");
+
+  const checkFuzzyDuplicates = async (item: QueueItem) => {
+    if (!item.success || !item.fullName) return;
+
+    try {
+      const response = await fetch(
+        `http://localhost:8000/ocr/teams/${teamId}/fuzzy-duplicates?name=${encodeURIComponent(item.fullName)}`
+      );
+      if (response.ok) {
+        const data = await response.json();
+        return data.matches;
+      }
+    } catch (err) {
+      // Silent fail - fuzzy check is optional
+    }
+    return [];
+  };
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.currentTarget.files;
@@ -87,13 +116,23 @@ export function BatchUpload({ teamId, onItemsSaved }: BatchUploadProps) {
       const batchResult = await response.json();
 
       // Convert to queue items with editable fields
-      const newItems: QueueItem[] = batchResult.items.map(
-        (item: OCRBatchItem, idx: number) => ({
-          ...item,
-          id: `${Date.now()}_${idx}`,
-          editedFirstName: item.firstName || "",
-          editedLastName: item.lastName || "",
-          editedDOB: item.dateOfBirth || "",
+      const newItems: QueueItem[] = await Promise.all(
+        batchResult.items.map(async (item: OCRBatchItem, idx: number) => {
+          const queueItem: QueueItem = {
+            ...item,
+            id: `${Date.now()}_${idx}`,
+            editedFirstName: item.firstName || "",
+            editedLastName: item.lastName || "",
+            editedDOB: item.dateOfBirth || "",
+          };
+
+          // Check for fuzzy duplicates
+          const duplicates = await checkFuzzyDuplicates(queueItem);
+          if (duplicates && duplicates.length > 0) {
+            queueItem.fuzzyDuplicates = duplicates;
+          }
+
+          return queueItem;
         })
       );
 
@@ -151,12 +190,21 @@ export function BatchUpload({ teamId, onItemsSaved }: BatchUploadProps) {
       return;
     }
 
-    // Check for over_age and confirm
+    // Check for over_age and fuzzy duplicates and confirm
     const overAgeItems = itemsToSave.filter((item) => item.eligibilityStatus === "over_age");
+    const duplicateItems = itemsToSave.filter((item) => item.fuzzyDuplicates && item.fuzzyDuplicates.length > 0);
+
+    let confirmMessage = "";
     if (overAgeItems.length > 0) {
-      if (!confirm(`${overAgeItems.length} นักกีฬาอายุเกินรุ่น ต้องการบันทึกต่อหรือไม่?`)) {
-        return;
-      }
+      confirmMessage += `${overAgeItems.length} นักกีฬาอายุเกินรุ่น`;
+    }
+    if (duplicateItems.length > 0) {
+      if (confirmMessage) confirmMessage += "\n";
+      confirmMessage += `${duplicateItems.length} นักกีฬาอาจซ้ำกับเดิม`;
+    }
+
+    if (confirmMessage && !confirm(`${confirmMessage}\n\nต้องการบันทึกต่อหรือไม่?`)) {
+      return;
     }
 
     try {
@@ -209,8 +257,36 @@ export function BatchUpload({ teamId, onItemsSaved }: BatchUploadProps) {
     if (confirm("ล้างคิว OCR ทั้งหมดหรือไม่?")) {
       setQueue([]);
       setSelectedIds(new Set());
+      setFilter("all");
     }
   };
+
+  const getFilteredQueue = () => {
+    return queue.filter((item) => {
+      if (filter === "all") return true;
+      if (filter === "complete") {
+        return (
+          item.success &&
+          item.editedFirstName.trim() &&
+          item.editedLastName.trim() &&
+          item.editedDOB &&
+          (!item.warnings || item.warnings.length === 0)
+        );
+      }
+      if (filter === "warnings") {
+        return item.success && item.warnings && item.warnings.length > 0;
+      }
+      if (filter === "over_age") {
+        return item.eligibilityStatus === "over_age";
+      }
+      if (filter === "duplicates") {
+        return item.fuzzyDuplicates && item.fuzzyDuplicates.length > 0;
+      }
+      return true;
+    });
+  };
+
+  const filteredQueue = getFilteredQueue();
 
   return (
     <div className="space-y-4">
@@ -225,11 +301,11 @@ export function BatchUpload({ teamId, onItemsSaved }: BatchUploadProps) {
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              เลือกไฟล์ (JPG/PNG) สูงสุด 30 ไฟล์
+              เลือกไฟล์ (JPG/PNG/PDF) สูงสุด 30 ไฟล์
             </label>
             <input
               type="file"
-              accept="image/jpeg,image/png"
+              accept="image/jpeg,image/png,application/pdf"
               multiple
               onChange={handleFileSelect}
               disabled={uploading}
@@ -261,6 +337,27 @@ export function BatchUpload({ teamId, onItemsSaved }: BatchUploadProps) {
             </button>
           </div>
 
+          {/* Filter Buttons */}
+          <div className="mb-4 flex gap-2 flex-wrap">
+            {(["all", "complete", "warnings", "over_age", "duplicates"] as const).map((f) => (
+              <button
+                key={f}
+                onClick={() => setFilter(f)}
+                className={`px-3 py-1 text-sm rounded-full transition ${
+                  filter === f
+                    ? "bg-blue-600 text-white"
+                    : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+                }`}
+              >
+                {f === "all" && `ทั้งหมด (${queue.length})`}
+                {f === "complete" && `ข้อมูลครบ (${queue.filter(q => q.success && q.editedFirstName.trim() && q.editedLastName.trim() && q.editedDOB && (!q.warnings || q.warnings.length === 0)).length})`}
+                {f === "warnings" && `มีคำเตือน (${queue.filter(q => q.success && q.warnings && q.warnings.length > 0).length})`}
+                {f === "over_age" && `อายุเกินรุ่น (${queue.filter(q => q.eligibilityStatus === "over_age").length})`}
+                {f === "duplicates" && `อาจซ้ำ (${queue.filter(q => q.fuzzyDuplicates && q.fuzzyDuplicates.length > 0).length})`}
+              </button>
+            ))}
+          </div>
+
           {/* Queue Table */}
           <div className="overflow-x-auto mb-4">
             <table className="w-full text-sm">
@@ -285,7 +382,7 @@ export function BatchUpload({ teamId, onItemsSaved }: BatchUploadProps) {
                 </tr>
               </thead>
               <tbody>
-                {queue.map((item) => (
+                {filteredQueue.map((item) => (
                   <tr key={item.id} className="border-b hover:bg-gray-50">
                     <td className="px-4 py-2">
                       <input
@@ -299,6 +396,11 @@ export function BatchUpload({ teamId, onItemsSaved }: BatchUploadProps) {
                     <td className="px-4 py-2 text-sm">
                       <div className="font-medium">{item.sourceFilename}</div>
                       {item.error && <div className="text-red-600 text-xs">{item.error}</div>}
+                      {item.fuzzyDuplicates && item.fuzzyDuplicates.length > 0 && (
+                        <div className="text-yellow-600 text-xs mt-1">
+                          ⚠️ อาจซ้ำกับ: {item.fuzzyDuplicates.map(d => `${d.matchedFullName} (${d.similarity}%)`).join(", ")}
+                        </div>
+                      )}
                     </td>
                     <td className="px-4 py-2">
                       {item.success ? (

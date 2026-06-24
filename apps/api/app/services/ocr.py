@@ -5,8 +5,28 @@ from datetime import datetime, date
 from io import BytesIO
 import pytesseract
 from typing import Optional, Tuple, Dict, List
+from pdf2image import convert_from_bytes
 
 class OCRService:
+    @staticmethod
+    def pdf_to_image_bytes(pdf_bytes: bytes) -> bytes:
+        """
+        Convert first page of PDF to image bytes (JPEG).
+        Returns bytes of the first page as JPEG image.
+        """
+        try:
+            images = convert_from_bytes(pdf_bytes, first_page=1, last_page=1, dpi=300)
+            if not images:
+                raise Exception("No pages found in PDF")
+
+            img = images[0]
+            img_byte_arr = BytesIO()
+            img.save(img_byte_arr, format='JPEG', quality=95)
+            img_byte_arr.seek(0)
+            return img_byte_arr.getvalue()
+        except Exception as e:
+            raise Exception(f"PDF conversion failed: {str(e)}")
+
     @staticmethod
     def preprocess_image(image_bytes: bytes) -> np.ndarray:
         """Preprocess image for better OCR accuracy."""
@@ -78,6 +98,16 @@ class OCRService:
         }
         word_lower = word.lower()
         return word_lower in noise_keywords or len(word) < 2
+
+    @staticmethod
+    def _contains_forbidden_words(name: str) -> bool:
+        """Check if extracted name contains forbidden/invalid words."""
+        forbidden = {
+            'บัตร', 'ประชาชน', 'เลขประจำตัว', 'national', 'id', 'card',
+            'เลข', 'ป.ตรว', 'ปตรว', 'passport', 'document'
+        }
+        name_lower = name.lower()
+        return any(word in name_lower for word in forbidden)
 
     @staticmethod
     def _extract_from_labeled_lines(lines: List[str]) -> Tuple[Optional[str], Optional[str]]:
@@ -188,55 +218,115 @@ class OCRService:
         """
         Extract date of birth from OCR text.
         Handles patterns like:
-        - เกิดวันที่ 23 ก.ย. 2552
-        - Date of Birth 23 Sep. 2009
-        - 23 Sep. 2009
-        - 23/09/2009
+        - เกิดวันที่ 23 ก.ย. 2552 (Thai month with dots)
+        - 23 กย 2552 (Thai month without dots)
+        - Date of Birth 23 September 2009 (English full month)
+        - 23 Sep. 2009 (English abbreviation)
+        - 2009-09-23 (ISO format)
+        - 23/09/2009 (slash format)
         """
         text = ocr_text.lower()
 
-        # Thai month abbreviations
-        thai_months = {
+        # Thai month abbreviations with dots
+        thai_months_dotted = {
             'ม.ค.': 1, 'ก.พ.': 2, 'มี.ค.': 3, 'เม.ย.': 4,
             'พ.ค.': 5, 'มิ.ย.': 6, 'ก.ค.': 7, 'ส.ค.': 8,
             'ก.ย.': 9, 'ต.ค.': 10, 'พ.ย.': 11, 'ธ.ค.': 12
         }
 
+        # Thai month abbreviations without dots
+        thai_months_nodots = {
+            'มค': 1, 'กพ': 2, 'มีค': 3, 'เมย': 4,
+            'พค': 5, 'มิย': 6, 'กค': 7, 'สค': 8,
+            'กย': 9, 'ตค': 10, 'พย': 11, 'ธค': 12
+        }
+
+        # English month full names
+        eng_months_full = {
+            'january': 1, 'february': 2, 'march': 3, 'april': 4,
+            'may': 5, 'june': 6, 'july': 7, 'august': 8,
+            'september': 9, 'october': 10, 'november': 11, 'december': 12
+        }
+
         # English month abbreviations
-        eng_months = {
+        eng_months_abbr = {
             'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4,
             'may': 5, 'jun': 6, 'jul': 7, 'aug': 8,
             'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12
         }
 
-        # Pattern 1: Thai format (23 ก.ย. 2552)
-        for thai_month, month_num in thai_months.items():
-            pattern = rf'(\d{{1,2}})\s+{re.escape(thai_month)}\s+(\d{{4}})'
+        # Pattern 1: English full month names (23 September 2009) - check before other patterns
+        for eng_month, month_num in eng_months_full.items():
+            pattern = rf'(\d{{1,2}})\s+{eng_month}\s+(\d{{4}})'
             match = re.search(pattern, text)
             if match:
                 day = int(match.group(1))
                 year = int(match.group(2))
-                # Convert BE to AD if needed
-                if year > 2500:
-                    year = year - 543
-                try:
-                    return date(year, month_num, day)
-                except ValueError:
-                    continue
+                if 1900 <= year <= 2100:
+                    try:
+                        return date(year, month_num, day)
+                    except ValueError:
+                        continue
 
-        # Pattern 2: English format with abbreviations (23 Sep. 2009)
-        for eng_month, month_num in eng_months.items():
+        # Pattern 2: English abbreviations (23 Sep. 2009)
+        for eng_month, month_num in eng_months_abbr.items():
             pattern = rf'(\d{{1,2}})\s+{eng_month}\.?\s+(\d{{4}})'
             match = re.search(pattern, text)
             if match:
                 day = int(match.group(1))
                 year = int(match.group(2))
-                try:
-                    return date(year, month_num, day)
-                except ValueError:
-                    continue
+                if 1900 <= year <= 2100:
+                    try:
+                        return date(year, month_num, day)
+                    except ValueError:
+                        continue
 
-        # Pattern 3: Slash format (23/09/2009 or 23/9/2009)
+        # Pattern 3: Thai format with dots (23 ก.ย. 2552)
+        for thai_month, month_num in thai_months_dotted.items():
+            pattern = rf'(\d{{1,2}})\s+{re.escape(thai_month)}\s+(\d{{4}})'
+            match = re.search(pattern, text)
+            if match:
+                day = int(match.group(1))
+                year = int(match.group(2))
+                if year > 2500:
+                    year = year - 543
+                if 1900 <= year <= 2100:
+                    try:
+                        return date(year, month_num, day)
+                    except ValueError:
+                        continue
+
+        # Pattern 4: Thai format without dots (23 กย 2552)
+        for thai_month, month_num in thai_months_nodots.items():
+            pattern = rf'(\d{{1,2}})\s+{re.escape(thai_month)}\s+(\d{{4}})'
+            match = re.search(pattern, text)
+            if match:
+                day = int(match.group(1))
+                year = int(match.group(2))
+                if year > 2500:
+                    year = year - 543
+                if 1900 <= year <= 2100:
+                    try:
+                        return date(year, month_num, day)
+                    except ValueError:
+                        continue
+
+        # Pattern 5: ISO format (2009-09-23) - check after named months to avoid false matches
+        pattern = r'(\d{4})-(\d{1,2})-(\d{1,2})'
+        match = re.search(pattern, text)
+        if match:
+            year = int(match.group(1))
+            month = int(match.group(2))
+            day = int(match.group(3))
+            if year > 2500:
+                year = year - 543
+            if 1900 <= year <= 2100:
+                try:
+                    return date(year, month, day)
+                except ValueError:
+                    pass
+
+        # Pattern 6: Slash format (23/09/2009 or 23/9/2009)
         pattern = r'(\d{1,2})/(\d{1,2})/(\d{4})'
         match = re.search(pattern, text)
         if match:
@@ -245,9 +335,10 @@ class OCRService:
             year = int(match.group(3))
             if year > 2500:
                 year = year - 543
-            try:
-                return date(year, month, day)
-            except ValueError:
-                pass
+            if 1900 <= year <= 2100:
+                try:
+                    return date(year, month, day)
+                except ValueError:
+                    pass
 
         return None

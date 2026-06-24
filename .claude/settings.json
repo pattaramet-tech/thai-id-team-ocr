@@ -24,7 +24,19 @@
       "PowerShell(pip install pytest fastapi sqlalchemy pydantic pydantic-settings python-dotenv -q 2>&1)",
       "PowerShell(pip install pytesseract opencv-python openpyxl -q)",
       "PowerShell(pip install httpx -q)",
-      "PowerShell(pip install python-multipart -q)"
+      "PowerShell(pip install python-multipart -q)",
+      "Bash(python -m pytest tests/test_ocr.py -v)",
+      "Bash(pip install *)",
+      "Bash(python -m pytest tests/test_ocr.py::TestDateOfBirthExtraction -v)",
+      "Bash(python -m pytest tests/test_ocr.py::TestForbiddenWords -v)",
+      "Bash(python -m pytest tests/test_duplicates.py -v)",
+      "Bash(python -m pytest tests/test_batch_ocr.py::TestFuzzyDuplicatesEndpoint -v)",
+      "Bash(python -m pytest tests/ -v --tb=short)",
+      "Bash(python -m pytest tests/test_batch_ocr.py::TestBatchUploadEndpoint::test_batch_upload_invalid_file_type -v)",
+      "Bash(python -m pytest tests/test_batch_ocr.py::TestBatchUploadEndpoint::test_batch_upload_file_too_large -v)",
+      "Bash(python -m pytest tests/test_ocr_hardening.py::TestOCRWithComplexPatterns::test_mixed_thai_english_document -v)",
+      "Bash(python -m pytest tests/ -v --tb=line)",
+      "Bash(npm run *)"
     ]
   }
 }

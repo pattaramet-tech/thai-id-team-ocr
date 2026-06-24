@@ -5,14 +5,15 @@ from app.database import get_db
 from app.models import Player, Team
 from app.services.ocr import OCRService
 from app.services.eligibility import date_to_birth_year_be, check_eligibility_for_player
+from app.services.duplicates import DuplicateDetectionService
 from app.schemas.ocr import OCRPreviewResponse, OCRBatchResponse, OCRBatchItemResponse
 from datetime import datetime, date
 from typing import Optional, Tuple
 
 router = APIRouter()
 
-ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png"}
-MAX_FILE_SIZE = 5 * 1024 * 1024  # 5 MB per file for batch
+ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png", "pdf"}
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB per file (for PDF support)
 MAX_BATCH_FILES = 30
 
 def allowed_file(filename: str) -> bool:
@@ -27,17 +28,28 @@ def process_ocr_file(
     """
     Process a single OCR file and return result or error.
     Returns (result, error) where one is None.
+    Supports JPG, PNG, and PDF files.
     """
     try:
         # Validate file
         if not allowed_file(filename):
-            return None, "Only JPG and PNG files are allowed"
+            return None, "Only JPG, PNG, and PDF files are allowed"
 
         if len(contents) > MAX_FILE_SIZE:
             return None, f"File size exceeds {MAX_FILE_SIZE // (1024*1024)} MB limit"
 
+        # Convert PDF to image if needed
+        image_bytes = contents
+        file_ext = filename.rsplit(".", 1)[1].lower() if "." in filename else ""
+
+        if file_ext == "pdf":
+            try:
+                image_bytes = OCRService.pdf_to_image_bytes(contents)
+            except Exception as e:
+                return None, f"PDF conversion failed: {str(e)}"
+
         # Extract text with confidence
-        ocr_text, confidence = OCRService.extract_text_with_confidence(contents)
+        ocr_text, confidence = OCRService.extract_text_with_confidence(image_bytes)
 
         # Redact ID numbers
         redacted_text = OCRService.redact_thai_id_numbers(ocr_text)
@@ -75,6 +87,12 @@ def process_ocr_file(
             warnings.append("Could not extract date of birth from OCR")
         if confidence < 0.7:
             warnings.append(f"Low OCR confidence: {confidence:.1%}")
+        if first_name and OCRService._contains_forbidden_words(first_name):
+            warnings.append("First name may contain invalid document text")
+        if last_name and OCRService._contains_forbidden_words(last_name):
+            warnings.append("Last name may contain invalid document text")
+        if eligibility_result["status"] == "over_age":
+            warnings.append(f"Participant is over age group ({eligibility_result['note']})")
 
         return OCRBatchItemResponse(
             sourceFilename=filename,
@@ -188,3 +206,38 @@ async def batch_upload_ocr(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Batch OCR processing failed: {str(e)}")
+
+
+@router.get("/teams/{team_id}/fuzzy-duplicates")
+async def check_fuzzy_duplicates(
+    team_id: int,
+    name: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Check if a name has fuzzy duplicates in a team.
+    Useful for checking OCR queue items against existing players.
+
+    Query params:
+    - team_id: Team ID
+    - name: Name to check for duplicates
+
+    Returns list of potential duplicates with similarity scores.
+    """
+    try:
+        team = db.query(Team).filter(Team.id == team_id).first()
+        if not team:
+            raise HTTPException(status_code=404, detail="Team not found")
+
+        matches = DuplicateDetectionService.check_team_duplicates(
+            team_id,
+            name,
+            db
+        )
+
+        return {"name": name, "matches": matches}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Duplicate check failed: {str(e)}")
