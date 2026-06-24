@@ -4,7 +4,13 @@
 import subprocess
 import sys
 import os
+import shutil
+import platform
 from pathlib import Path
+
+# Check for command-line arguments
+STRICT_STARTUP = "--strict-startup" in sys.argv
+IS_WINDOWS = platform.system() == "Windows"
 
 class DependencyChecker:
     """Check system dependencies."""
@@ -61,24 +67,58 @@ class DependencyChecker:
                 return True
         except FileNotFoundError:
             pass
-        self._log_error("Node.js not found")
+
+        # Node.js is critical only in strict startup mode
+        if STRICT_STARTUP:
+            self._log_error("Node.js not found")
+        else:
+            self._log_warn("Node.js not found - frontend may not work")
         return False
 
     def check_npm(self) -> bool:
         """Check npm installation."""
         try:
+            # Try standard npm first
             result = subprocess.run(
                 ["npm", "--version"],
                 capture_output=True,
                 text=True,
-                timeout=5
+                timeout=5,
+                shell=False
             )
             if result.returncode == 0:
                 self._log_ok(f"npm found: {result.stdout.strip()}")
                 return True
-        except FileNotFoundError:
+
+            # On Windows, try npm.cmd
+            if IS_WINDOWS:
+                result = subprocess.run(
+                    ["npm.cmd", "--version"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                    shell=True
+                )
+                if result.returncode == 0:
+                    self._log_ok(f"npm found (via npm.cmd): {result.stdout.strip()}")
+                    return True
+
+        except Exception as e:
             pass
-        self._log_error("npm not found")
+
+        # npm not found - handle based on mode
+        if STRICT_STARTUP:
+            self._log_error("npm not found - Node.js may not be in PATH")
+        else:
+            self._log_warn("npm not found - frontend may not work")
+
+        # Provide helpful guidance on Windows
+        if IS_WINDOWS:
+            print("   Troubleshoot: Run these in Command Prompt:")
+            print("     - where npm")
+            print("     - where npm.cmd")
+            print("   If npm.cmd exists, Node.js is installed but not in PATH")
+
         return False
 
     def check_tesseract(self) -> bool:
