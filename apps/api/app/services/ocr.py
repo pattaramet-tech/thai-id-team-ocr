@@ -88,6 +88,25 @@ class OCRService:
         return text
 
     @staticmethod
+    def _remove_thai_title(text: str) -> str:
+        """Remove Thai title from start of text. Order matters: longest first."""
+        if not text:
+            return text
+
+        # Titles ordered from longest to shortest to avoid partial matches
+        titles_ordered = [
+            'เด็กหญิง', 'เด็กชาย', 'นางสาว', 'ด.ญ.', 'ด.ช.', 'นาย', 'นาง'
+        ]
+
+        text = text.strip()
+        for title in titles_ordered:
+            if text.startswith(title):
+                text = text[len(title):].strip()
+                break
+
+        return text
+
+    @staticmethod
     def _is_noise_word(word: str) -> bool:
         """Check if word is likely document noise, not a name."""
         noise_keywords = {
@@ -121,8 +140,7 @@ class OCRService:
                 remaining = line.replace('ชื่อตัวและชื่อสกุล', '').replace('ชื่อ', '').strip()
                 if remaining:
                     # Remove title if present
-                    for title in ['นาย', 'นาง', 'นางสาว', 'เด็กชาย', 'เด็กหญิง']:
-                        remaining = remaining.replace(title, '').strip()
+                    remaining = OCRService._remove_thai_title(remaining)
 
                     parts = [p.strip() for p in remaining.split() if p.strip() and not OCRService._is_noise_word(p)]
                     if len(parts) >= 2:
@@ -145,7 +163,7 @@ class OCRService:
     @staticmethod
     def _extract_from_title_pattern(line: str) -> Tuple[Optional[str], Optional[str]]:
         """Extract names from title patterns like 'นาย <first> <last>'."""
-        # Order titles from longest to shortest to avoid partial matches
+        # Titles ordered from longest to shortest
         titles_ordered = [
             'เด็กหญิง', 'เด็กชาย', 'นางสาว', 'ด.ญ.', 'ด.ช.', 'นาย', 'นาง'
         ]

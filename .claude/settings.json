@@ -36,7 +36,11 @@
       "Bash(python -m pytest tests/test_batch_ocr.py::TestBatchUploadEndpoint::test_batch_upload_file_too_large -v)",
       "Bash(python -m pytest tests/test_ocr_hardening.py::TestOCRWithComplexPatterns::test_mixed_thai_english_document -v)",
       "Bash(python -m pytest tests/ -v --tb=line)",
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "Bash(python -m pytest tests/test_ocr.py::TestTitleRemoval -v)",
+      "Bash(python -m pytest tests/test_ocr.py::TestThaiNameExtraction::test_extract_labeled_line_with_nang_sao tests/test_ocr.py::TestThaiNameExtraction::test_extract_labeled_line_with_dek_ying tests/test_ocr.py::TestThaiNameExtraction::test_extract_labeled_line_separate_fields -v)",
+      "Bash(python -m pytest tests/test_ocr.py -k \"labeled\" -v)",
+      "Bash(python -m pytest tests/ -v)"
     ]
   }
 }

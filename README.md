@@ -28,13 +28,15 @@ A local-first web application for competition admins to securely extract Thai fi
 - Delete team functionality
 - Team statistics dashboard
 
-### Phase 2: OCR Upload & Review (Planned)
-- Upload JPG/PNG images
+### Phase 2: OCR Upload & Review ✅
+- Upload JPG/PNG/PDF images
 - Tesseract OCR with Thai language support
 - Automatic Thai ID number detection and redaction
 - Extract first name and surname automatically
 - Manual review and verification workflow
 - Edit names before verification
+- Fuzzy duplicate detection
+- Advanced date extraction (Thai/English formats)
 
 ### Phase 3: Export XLSX (Planned)
 - Export verified players to Excel
@@ -65,6 +67,8 @@ A local-first web application for competition admins to securely extract Thai fi
 - **ORM**: SQLAlchemy
 - **OCR**: Tesseract (Thai + English)
 - **Image Processing**: OpenCV
+- **PDF Support**: pdf2image + Poppler
+- **Duplicate Detection**: difflib (fuzzy name matching)
 - **Excel Generation**: openpyxl
 - **Python**: 3.8+
 
@@ -91,6 +95,17 @@ A local-first web application for competition admins to securely extract Thai fi
 3. **Git**
    - Download: https://git-scm.com/
    - Verify: `git --version`
+
+4. **Poppler** (Required for PDF OCR support)
+   - **Windows**: 
+     - Download: https://github.com/oschwartz10612/poppler-windows/releases/
+     - Extract and add to system PATH, or install via Chocolatey: `choco install poppler`
+   - **macOS**: 
+     - Install via Homebrew: `brew install poppler`
+   - **Linux**: 
+     - Ubuntu/Debian: `sudo apt-get install poppler-utils`
+     - Already included in GitHub Actions workflow
+   - ⚠️ **Note**: PDF support is optional. JPG/PNG OCR works without Poppler.
 
 ### Clone Repository
 
@@ -338,6 +353,12 @@ pip install -r requirements.txt
 - Check backend is running on `http://localhost:8000`
 - Check `.env.local` has `NEXT_PUBLIC_API_URL=http://localhost:8000`
 - Clear browser cache
+
+### PDF Upload Fails (poppler-utils error)
+- Install Poppler (see Prerequisites section above)
+- **Windows**: Add Poppler `/bin` folder to system PATH
+- **Linux/macOS**: Use package manager as shown above
+- **Workaround**: Use JPG/PNG files instead (OCR still works without PDF support)
 
 ## 📊 Project Statistics
 
