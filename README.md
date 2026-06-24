@@ -168,7 +168,33 @@ python -m venv venv
 pip install -r requirements.txt
 ```
 
-## 🚀 Running Locally
+## 🖥️ Windows Quick Start (One-Click)
+
+**For Windows 10/11 users, the easiest way:**
+
+### First Time Setup
+```batch
+setup-windows.bat
+```
+This installs everything in 2-5 minutes.
+
+### Every Day - Just Double-Click
+```batch
+start.bat
+```
+Then:
+- Browser opens automatically at http://localhost:3000
+- Backend runs on http://localhost:8000
+- Close the two windows or run `stop.bat` to stop
+
+### Shutdown
+```batch
+stop.bat
+```
+
+For detailed Windows setup, see: **[docs/WINDOWS_SETUP.md](docs/WINDOWS_SETUP.md)**
+
+## 🚀 Running Locally (All Platforms)
 
 ### Option 1: Run Backend Only
 
@@ -418,6 +444,68 @@ type: short description
 
 Types: feat, fix, docs, refactor, test, chore
 ```
+
+## 🧪 Phase 5.2 Windows Startup Testing Checklist
+
+### Setup Script Test
+- [ ] Run `setup-windows.bat` from project root
+- [ ] Python venv created successfully
+- [ ] Python dependencies installed (no errors)
+- [ ] Node modules installed (no errors)
+- [ ] All required folders created (uploads/, exports/, temp/, backups/)
+- [ ] Dependency check shows correct status
+
+### Dependency Checker Test
+- [ ] Run `check-deps.bat` 
+- [ ] Shows Python version
+- [ ] Shows Node.js version
+- [ ] Shows npm version
+- [ ] Shows Tesseract status (OK or missing)
+- [ ] Shows Thai language status (OK, missing, or N/A)
+- [ ] Shows Poppler status (OK or missing)
+- [ ] Shows venv status (found or missing)
+- [ ] Shows node_modules status (found or missing)
+- [ ] Summary shows OK/WARN/ERROR counts
+- [ ] Returns correct exit code
+
+### Start Script Test
+- [ ] Run `start.bat` from project root
+- [ ] Dependency check passes
+- [ ] Creates folders if missing
+- [ ] Backend starts in separate window (Port 8000)
+- [ ] Backend health check passes
+- [ ] Frontend starts in separate window (Port 3000)
+- [ ] Browser opens automatically at http://localhost:3000
+- [ ] Shows clear message with port numbers
+- [ ] No errors in either window
+- [ ] Can access backend docs: http://localhost:8000/docs
+- [ ] Can login and access admin pages
+
+### Stop Script Test
+- [ ] Run `stop.bat`
+- [ ] Backend process (port 8000) stops or shows message
+- [ ] Frontend process (port 3000) stops or shows message
+- [ ] Shows clear shutdown message
+- [ ] No error messages
+
+### Port Conflict Test
+- [ ] Use something on port 8000 to cause conflict
+- [ ] `start.bat` shows clear error message
+- [ ] `stop.bat` can recover if possible
+- [ ] Instructions provided for manual cleanup
+
+### Dependency Missing Test
+- [ ] Temporarily remove/rename Python venv
+- [ ] Run `setup-windows.bat` - should recreate it
+- [ ] Run `check-deps.bat` - should show missing then OK
+- [ ] Clear browser cache, login works
+
+### User Experience Test
+- [ ] Script messages are in clear English/Thai
+- [ ] No cryptic error codes
+- [ ] Instructions are actionable (run this, download that)
+- [ ] Pauses between steps so user can read
+- [ ] Progress is visible (not silent)
 
 ## 🧪 Phase 5.1 Testing Checklist
 
