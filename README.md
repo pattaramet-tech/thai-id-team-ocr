@@ -77,6 +77,28 @@ A local-first web application for competition admins to securely extract Thai fi
 - Thai language UI labels
 - Authentication and authorization checks
 
+### Phase 5.2: Windows One-Click Local Startup + Dependency Checker ✅
+- Windows batch scripts for startup/shutdown
+- One-click application launch
+- Automatic dependency validation
+- Folder creation if missing
+- Backend health check
+- Automatic browser launch
+- Clear error messages (Thai/English)
+- Port conflict detection and guidance
+
+### Phase 5.3: Update / Release Workflow + Backup Before Update ✅
+- Safe update script with GitHub pull
+- Automatic backup before update
+- Working tree validation
+- Dependency installation
+- Test suite execution
+- Rollback guidance
+- Version checking
+- Comprehensive update documentation
+- Release checklist for maintainers
+- Changelog tracking all versions
+
 ### Phase 4+: Advanced Features (Future)
 - Batch upload with progress indicator
 - Team-specific OCR confidence thresholds
@@ -191,6 +213,19 @@ Then:
 ```batch
 stop.bat
 ```
+
+### Update the App
+```batch
+update-windows.bat
+```
+This safely:
+- Creates backup of your database
+- Pulls latest code from GitHub
+- Installs new dependencies
+- Runs tests to verify
+- Provides rollback guidance if needed
+
+For details, see: **[docs/UPDATE_GUIDE.md](docs/UPDATE_GUIDE.md)**
 
 For detailed Windows setup, see: **[docs/WINDOWS_SETUP.md](docs/WINDOWS_SETUP.md)**
 
@@ -445,6 +480,70 @@ type: short description
 Types: feat, fix, docs, refactor, test, chore
 ```
 
+## 🧪 Phase 5.3 Update/Release Testing Checklist
+
+### Update Script Test
+- [ ] Run `update-windows.bat` with clean working tree
+- [ ] Script checks git is installed
+- [ ] Script validates working tree is clean
+- [ ] Script creates backup before pull
+- [ ] Backup file created in backups/ folder
+- [ ] Git pull succeeds
+- [ ] Python dependencies install
+- [ ] Node dependencies install
+- [ ] Backend tests run and pass
+- [ ] Frontend builds successfully
+- [ ] Success message shows
+- [ ] Old backup files still exist (not deleted)
+
+### Backup Before Update Test
+- [ ] Backup created successfully
+- [ ] Backup has timestamp in filename
+- [ ] Backup metadata file created
+- [ ] Backup contains database file
+- [ ] Backup size > 0 bytes
+- [ ] Multiple backups can coexist
+
+### Version Check Test
+- [ ] Run `python scripts/check_version.py`
+- [ ] Shows current local version
+- [ ] Shows latest git tag
+- [ ] Shows latest commit
+- [ ] Correctly identifies if update available
+- [ ] Returns proper exit code
+
+### Rollback Test (After Failed Update)
+- [ ] Restore from Admin UI works
+- [ ] Restore from backup file works
+- [ ] Old data restored correctly
+- [ ] Database queries work after restore
+- [ ] User accounts intact
+- [ ] Player records intact
+
+### Working Tree Validation Test
+- [ ] Make uncommitted changes (edit file)
+- [ ] Run `update-windows.bat`
+- [ ] Script detects changes and stops
+- [ ] Clear error message shown
+- [ ] Suggests git add/commit/stash
+- [ ] No update happens
+
+### Edge Cases
+- [ ] Database missing (creates backup anyway)
+- [ ] Network timeout (clear error message)
+- [ ] Large database (backup succeeds)
+- [ ] Many files changed in update
+- [ ] New dependencies added
+- [ ] Dependencies removed
+
+### Documentation Test
+- [ ] UPDATE_GUIDE.md is comprehensive
+- [ ] RELEASE_CHECKLIST.md is accurate
+- [ ] CHANGELOG.md lists all versions
+- [ ] README update section works
+- [ ] Links to all docs are valid
+- [ ] Instructions are clear
+
 ## 🧪 Phase 5.2 Windows Startup Testing Checklist
 
 ### Setup Script Test
@@ -591,6 +690,21 @@ This project is created for competition administration purposes with strict priv
 
 ---
 
-**Status:** Phase 5.1 Admin UI (Complete) ✅  
+**Status:** Phase 5.3 Update/Release Workflow (Complete) ✅  
+**Current Version:** 0.5.3  
 **Last Updated:** 2026-06-25  
 **Repository:** https://github.com/pattaramet-tech/thai-id-team-ocr
+
+---
+
+## 📚 Documentation Index
+
+| Document | Purpose |
+|----------|---------|
+| **README.md** | Project overview and quick start (this file) |
+| **CLAUDE.md** | Project requirements and constraints |
+| **DEVELOPMENT.md** | Development workflow and standards |
+| **CHANGELOG.md** | Version history and what changed |
+| **docs/WINDOWS_SETUP.md** | Windows installation and troubleshooting |
+| **docs/UPDATE_GUIDE.md** | How to safely update the application |
+| **docs/RELEASE_CHECKLIST.md** | Pre-release validation checklist |

@@ -45,7 +45,7 @@ echo.
 REM Start backend in separate window
 start "Thai ID Team OCR - Backend" cmd /k ^
     cd apps\api ^& ^
-    venv\Scripts\activate ^& ^
+    .venv\Scripts\activate.bat ^& ^
     python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 REM Wait for backend to start
