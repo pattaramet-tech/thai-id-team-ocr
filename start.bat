@@ -18,12 +18,34 @@ if not exist "apps\api" (
     exit /b 1
 )
 
-REM Run dependency check
+REM Pre-check: venv exists
+if not exist "apps\api\.venv\Scripts\activate.bat" (
+    echo ERROR: Python virtual environment not found!
+    echo.
+    echo Setup is incomplete. Please run:
+    echo   setup-windows.bat
+    echo.
+    pause
+    exit /b 1
+)
+
+REM Pre-check: node_modules exists
+if not exist "apps\web\node_modules" (
+    echo ERROR: Node.js modules not found!
+    echo.
+    echo Setup is incomplete. Please run:
+    echo   setup-windows.bat
+    echo.
+    pause
+    exit /b 1
+)
+
+REM Run dependency check (strict mode for startup)
 echo Checking dependencies...
-python scripts/check_deps.py
+python scripts/check_deps.py --strict-startup
 if errorlevel 1 (
     echo.
-    echo ERROR: Dependencies missing!
+    echo ERROR: Critical dependencies missing!
     echo Please run: setup-windows.bat
     pause
     exit /b 1
@@ -45,7 +67,7 @@ echo.
 REM Start backend in separate window
 start "Thai ID Team OCR - Backend" cmd /k ^
     cd apps\api ^& ^
-    venv\Scripts\activate ^& ^
+    .venv\Scripts\activate.bat ^& ^
     python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 REM Wait for backend to start
