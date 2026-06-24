@@ -47,7 +47,9 @@
       "Bash(python -c \"from app.main import app; print\\('✓ App loaded successfully'\\)\")",
       "Bash(python -m pytest tests/test_auth.py -v)",
       "Bash(python -m pytest tests/test_auth.py::TestAuthService::test_hash_and_verify_password -v)",
-      "Bash(python -c \"from argon2 import PasswordHasher; print\\('Argon2 installed'\\)\")"
+      "Bash(python -c \"from argon2 import PasswordHasher; print\\('Argon2 installed'\\)\")",
+      "Bash(python -m pytest tests/test_system.py -v)",
+      "Bash(python -m pytest tests/test_system.py::TestBackupService::test_create_backup -v)"
     ]
   }
 }
