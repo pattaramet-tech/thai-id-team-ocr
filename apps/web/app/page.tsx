@@ -1,7 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import Header from "@/components/Header";
+
+const LITE_MODE = process.env.NEXT_PUBLIC_LITE_MODE === "true";
 
 interface User {
   id: number;
@@ -12,6 +15,7 @@ interface User {
 
 export default function Home() {
   const [user, setUser] = useState<User | null>(null);
+  const router = useRouter();
 
   useEffect(() => {
     checkAuth();
@@ -31,6 +35,11 @@ export default function Home() {
       if (res.ok) {
         const userData = await res.json();
         setUser(userData);
+
+        // In Lite Mode, redirect logged-in users to Teams page
+        if (LITE_MODE) {
+          router.push("/teams");
+        }
       }
     } catch (err) {
       console.error("Auth check failed:", err);

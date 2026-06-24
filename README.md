@@ -168,11 +168,13 @@ python -m venv venv
 pip install -r requirements.txt
 ```
 
-## 🖥️ Windows Quick Start (One-Click)
+## 🖥️ Windows Quick Start (One-Click) - Lite Mode
 
-**For Windows 10/11 users, the easiest way:**
+**For Windows 10/11 users - the simplest way to use the app**
 
-### First Time Setup
+Lite Mode focuses on essentials: upload images, verify names, export Excel.
+
+### First Time Setup (One-Time Only)
 ```batch
 setup-windows.bat
 ```
@@ -182,17 +184,27 @@ This installs everything in 2-5 minutes.
 ```batch
 start.bat
 ```
+
 Then:
-- Browser opens automatically at http://localhost:3000
-- Backend runs on http://localhost:8000
-- Close the two windows or run `stop.bat` to stop
+- 📸 **Create Teams** - organize by age group and gender
+- 📤 **Upload Images** - upload ID card photos (OCR auto-processes)
+- ✅ **Review Names** - verify extracted first/last names and dates
+- 📊 **Export Excel** - get verified player list in Excel
+- 💾 **Backup** - simple one-click data backup
+
+**Complete Guide**: See **[docs/LITE_MODE_GUIDE.md](docs/LITE_MODE_GUIDE.md)**
 
 ### Shutdown
 ```batch
 stop.bat
 ```
 
-For detailed Windows setup, see: **[docs/WINDOWS_SETUP.md](docs/WINDOWS_SETUP.md)**
+### Update the App
+```batch
+update-windows.bat
+```
+
+For advanced setup, see: **[docs/WINDOWS_SETUP.md](docs/WINDOWS_SETUP.md)**
 
 ## 🚀 Running Locally (All Platforms)
 

@@ -11,6 +11,8 @@ interface User {
   role: string;
 }
 
+const LITE_MODE = process.env.NEXT_PUBLIC_LITE_MODE === "true";
+
 export default function Header({ user }: { user?: User | null }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -60,8 +62,8 @@ export default function Header({ user }: { user?: User | null }) {
                 Export
               </NavLink>
 
-              {/* Admin menu - only show if user is admin */}
-              {user && user.role === "admin" && (
+              {/* Admin menu - only show if user is admin and not in Lite Mode */}
+              {user && user.role === "admin" && !LITE_MODE && (
                 <>
                   <div className="border-l border-gray-300" />
                   <NavLink
@@ -78,6 +80,19 @@ export default function Header({ user }: { user?: User | null }) {
                   </NavLink>
                   <NavLink href="/admin/help" active={isActive("/admin/help")}>
                     คู่มือ
+                  </NavLink>
+                </>
+              )}
+
+              {/* Lite mode simple backup/cleanup */}
+              {user && user.role === "admin" && LITE_MODE && (
+                <>
+                  <div className="border-l border-gray-300" />
+                  <NavLink
+                    href="/admin/backup"
+                    active={isActive("/admin/backup")}
+                  >
+                    สำรองข้อมูล
                   </NavLink>
                 </>
               )}
