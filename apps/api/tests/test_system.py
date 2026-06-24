@@ -187,3 +187,128 @@ class TestBackupService:
         result = BackupService.delete_backup("../invalid.zip", db_session)
         assert not result["success"]
         assert "error" in result
+
+    def test_safe_extract_prevents_zip_slip(self, db_session):
+        """Zip Slip attack prevention - path traversal via ZIP."""
+        import zipfile
+        BackupService._ensure_backup_dir()
+
+        # Create malicious ZIP with path traversal
+        zip_path = BackupService.BACKUP_DIR / "malicious.zip"
+        with zipfile.ZipFile(zip_path, "w") as zf:
+            # Try to extract to parent directory
+            zf.writestr("../../../etc/passwd", "malicious content")
+
+        # Attempt to extract to temp directory
+        extract_dir = Path("temp_test_zip_slip")
+        extract_dir.mkdir(exist_ok=True)
+
+        # Should raise ValueError for unsafe path
+        try:
+            BackupService._safe_extract_zip(zip_path, extract_dir)
+            assert False, "Should have raised ValueError for Zip Slip"
+        except ValueError as e:
+            assert "escapes destination" in str(e) or "Unsafe path" in str(e)
+
+        # Cleanup
+        zip_path.unlink()
+        import shutil
+        if extract_dir.exists():
+            shutil.rmtree(extract_dir)
+
+    def test_safe_extract_blocks_absolute_paths(self, db_session):
+        """ZIP member with absolute path is blocked."""
+        import zipfile
+        BackupService._ensure_backup_dir()
+
+        zip_path = BackupService.BACKUP_DIR / "absolute_path.zip"
+        with zipfile.ZipFile(zip_path, "w") as zf:
+            zf.writestr("/etc/passwd", "malicious")
+
+        extract_dir = Path("temp_test_absolute")
+        extract_dir.mkdir(exist_ok=True)
+
+        try:
+            BackupService._safe_extract_zip(zip_path, extract_dir)
+            assert False, "Should have raised ValueError for absolute path"
+        except ValueError as e:
+            assert "Unsafe path" in str(e)
+
+        # Cleanup
+        zip_path.unlink()
+        import shutil
+        if extract_dir.exists():
+            shutil.rmtree(extract_dir)
+
+    def test_create_backup_include_exports_param(self, db_session):
+        """Create backup respects include_exports parameter."""
+        BackupService._ensure_backup_dir()
+
+        # Create test file in exports
+        Path("exports").mkdir(exist_ok=True)
+        test_file = Path("exports") / "test.txt"
+        test_file.write_text("export data")
+
+        # Test with include_exports=False (default)
+        result = BackupService.create_backup(db_session, include_exports=False)
+        assert result["success"]
+        assert result["backup"]["include_exports"] is False
+
+        # Cleanup
+        backup_path = BackupService.BACKUP_DIR / result["backup"]["filename"]
+        backup_path.unlink()
+
+        # Test with include_exports=True
+        result = BackupService.create_backup(db_session, include_exports=True)
+        assert result["success"]
+        assert result["backup"]["include_exports"] is True
+
+        # Cleanup
+        backup_path = BackupService.BACKUP_DIR / result["backup"]["filename"]
+        backup_path.unlink()
+        test_file.unlink()
+
+    def test_restore_temp_cleanup_on_success(self, db_session):
+        """Temp directory is cleaned up after successful restore."""
+        BackupService._ensure_backup_dir()
+
+        # Create and backup database
+        result = BackupService.create_backup(db_session)
+        backup_filename = result["backup"]["filename"]
+
+        # Restore
+        restore_result = BackupService.restore_backup(backup_filename, db_session)
+        assert restore_result["success"]
+
+        # Verify no restore_temp directories exist
+        temp_dirs = list(Path(".").glob("restore_temp*"))
+        assert len(temp_dirs) == 0, f"Found orphaned temp dirs: {temp_dirs}"
+
+        # Cleanup
+        backup_path = BackupService.BACKUP_DIR / backup_filename
+        backup_path.unlink()
+
+    def test_restore_temp_cleanup_on_error(self, db_session):
+        """Temp directory is cleaned up even on restore error."""
+        # Try to restore non-existent backup
+        restore_result = BackupService.restore_backup("nonexistent.zip", db_session)
+        assert not restore_result["success"]
+
+        # Verify no restore_temp directories exist
+        temp_dirs = list(Path(".").glob("restore_temp*"))
+        assert len(temp_dirs) == 0, f"Found orphaned temp dirs: {temp_dirs}"
+
+    def test_backup_path_traversal_defense(self):
+        """Backup filename validation prevents path traversal."""
+        # These should all be rejected
+        assert not BackupService._is_safe_path("../backup.zip")
+        assert not BackupService._is_safe_path("backup/../file.zip")
+        assert not BackupService._is_safe_path("backup/subdir.zip")
+        assert not BackupService._is_safe_path("/etc/backup.zip")
+        assert not BackupService._is_safe_path("C:\\Windows\\backup.zip")
+        assert not BackupService._is_safe_path("backup.txt")  # Not .zip
+        assert not BackupService._is_safe_path("..\\backup.zip")  # Windows traversal
+
+        # These should be accepted
+        assert BackupService._is_safe_path("backup-2024-01-01.zip")
+        assert BackupService._is_safe_path("thai-id-team-ocr-backup-20240101-120000.zip")

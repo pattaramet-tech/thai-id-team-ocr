@@ -28,6 +28,8 @@ uploads/
 exports/
 temp/
 tmp/
+backups/
+restore_temp*/
 
 # OS / Editor
 .DS_Store

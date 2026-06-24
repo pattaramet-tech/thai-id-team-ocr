@@ -1,6 +1,7 @@
 import os
 import shutil
 import zipfile
+import tempfile
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Any, Optional
@@ -35,14 +36,52 @@ class BackupService:
         return True
 
     @staticmethod
-    def create_backup(db: Session, db_path: str = "thai_id_ocr.db", actor_name: str = "system") -> Dict[str, Any]:
+    def _safe_extract_zip(zip_path: Path, destination: Path) -> None:
         """
-        Create a backup of the database and exports.
+        Safely extract ZIP file preventing Zip Slip attacks.
+
+        Args:
+            zip_path: Path to ZIP file
+            destination: Where to extract
+
+        Raises:
+            ValueError: If ZIP contains unsafe paths
+        """
+        destination = destination.resolve()
+
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            for member in zf.infolist():
+                # Check for path traversal attempts
+                if ".." in member.filename or member.filename.startswith("/"):
+                    raise ValueError(f"Unsafe path in ZIP: {member.filename}")
+
+                # Resolve the full path where this member would be extracted
+                member_path = (destination / member.filename).resolve()
+
+                # Ensure the resolved path is still under destination
+                try:
+                    member_path.relative_to(destination)
+                except ValueError:
+                    raise ValueError(f"ZIP member escapes destination: {member.filename}")
+
+            # All members are safe, extract
+            zf.extractall(destination)
+
+    @staticmethod
+    def create_backup(
+        db: Session,
+        db_path: str = "thai_id_ocr.db",
+        actor_name: str = "system",
+        include_exports: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Create a backup of the database and optionally exports.
 
         Args:
             db: Database session
             db_path: Path to database file
             actor_name: User creating backup
+            include_exports: Whether to include exports directory
 
         Returns:
             Backup info dict
@@ -59,19 +98,21 @@ class BackupService:
                 if os.path.exists(db_path):
                     zf.write(db_path, arcname="thai_id_ocr.db")
 
-                # Add exports directory
-                for include_dir in BackupService.INCLUDE_DIRS:
-                    if os.path.exists(include_dir):
-                        for file_path in Path(include_dir).rglob("*"):
-                            if file_path.is_file():
-                                arcname = file_path.relative_to(".")
-                                zf.write(file_path, arcname=arcname)
+                # Add exports directory only if requested
+                if include_exports:
+                    for include_dir in BackupService.INCLUDE_DIRS:
+                        if os.path.exists(include_dir):
+                            for file_path in Path(include_dir).rglob("*"):
+                                if file_path.is_file():
+                                    arcname = file_path.relative_to(".")
+                                    zf.write(file_path, arcname=arcname)
 
             backup_info = {
                 "filename": backup_filename,
                 "created_at": datetime.now().isoformat(),
                 "size_bytes": backup_path.stat().st_size,
-                "size_mb": round(backup_path.stat().st_size / (1024 * 1024), 2)
+                "size_mb": round(backup_path.stat().st_size / (1024 * 1024), 2),
+                "include_exports": include_exports
             }
 
             # Log backup creation
@@ -79,7 +120,7 @@ class BackupService:
                 db,
                 action="backup_created",
                 entity_type="system",
-                message=f"Backup created: {backup_filename}",
+                message=f"Backup created: {backup_filename} (include_exports={include_exports})",
                 metadata=backup_info,
                 actor_name=actor_name
             )
@@ -169,7 +210,7 @@ class BackupService:
         actor_name: str = "system"
     ) -> Dict[str, Any]:
         """
-        Restore from a backup file.
+        Restore from a backup file using safe extraction.
 
         Args:
             filename: Backup filename to restore
@@ -188,60 +229,57 @@ class BackupService:
                 "error": "Backup not found or invalid filename"
             }
 
-        try:
-            # Create pre-restore backup
-            pre_restore_backup = BackupService.create_backup(
-                db,
-                db_path=db_path,
-                actor_name=f"{actor_name} (pre-restore)"
-            )
+        # Use temporary directory with context manager for automatic cleanup
+        with tempfile.TemporaryDirectory() as extract_dir:
+            try:
+                # Create pre-restore backup
+                pre_restore_backup = BackupService.create_backup(
+                    db,
+                    db_path=db_path,
+                    actor_name=f"{actor_name} (pre-restore)"
+                )
 
-            # Extract backup
-            extract_dir = Path("restore_temp")
-            extract_dir.mkdir(exist_ok=True)
+                extract_path = Path(extract_dir)
 
-            with zipfile.ZipFile(backup_path, "r") as zf:
-                zf.extractall(extract_dir)
+                # Safely extract backup (prevents Zip Slip attacks)
+                BackupService._safe_extract_zip(backup_path, extract_path)
 
-            # Restore database
-            restored_db = extract_dir / "thai_id_ocr.db"
-            if restored_db.exists():
-                shutil.copy2(restored_db, db_path)
+                # Restore database
+                restored_db = extract_path / "thai_id_ocr.db"
+                if restored_db.exists():
+                    shutil.copy2(restored_db, db_path)
 
-            # Restore exports
-            restored_exports = extract_dir / "exports"
-            if restored_exports.exists():
-                exports_dir = Path("exports")
-                if exports_dir.exists():
-                    shutil.rmtree(exports_dir)
-                shutil.copytree(restored_exports, exports_dir)
+                # Restore exports
+                restored_exports = extract_path / "exports"
+                if restored_exports.exists():
+                    exports_dir = Path("exports")
+                    if exports_dir.exists():
+                        shutil.rmtree(exports_dir)
+                    shutil.copytree(restored_exports, exports_dir)
 
-            # Cleanup
-            shutil.rmtree(extract_dir)
+                AuditService.log_action(
+                    db,
+                    action="backup_restored",
+                    entity_type="system",
+                    message=f"Backup restored: {filename}",
+                    actor_name=actor_name
+                )
 
-            AuditService.log_action(
-                db,
-                action="backup_restored",
-                entity_type="system",
-                message=f"Backup restored: {filename}",
-                actor_name=actor_name
-            )
+                return {
+                    "success": True,
+                    "message": f"Restored from {filename}",
+                    "pre_restore_backup": pre_restore_backup.get("backup", {}).get("filename")
+                }
 
-            return {
-                "success": True,
-                "message": f"Restored from {filename}",
-                "pre_restore_backup": pre_restore_backup.get("backup", {}).get("filename")
-            }
-
-        except Exception as e:
-            AuditService.log_action(
-                db,
-                action="backup_restore_failed",
-                entity_type="system",
-                message=f"Backup restore failed: {str(e)}",
-                actor_name=actor_name
-            )
-            return {
-                "success": False,
-                "error": str(e)
-            }
+            except Exception as e:
+                AuditService.log_action(
+                    db,
+                    action="backup_restore_failed",
+                    entity_type="system",
+                    message=f"Backup restore failed: {str(e)}",
+                    actor_name=actor_name
+                )
+                return {
+                    "success": False,
+                    "error": str(e)
+                }
