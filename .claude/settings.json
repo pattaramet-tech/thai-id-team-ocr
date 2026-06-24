@@ -40,7 +40,9 @@
       "Bash(python -m pytest tests/test_ocr.py::TestTitleRemoval -v)",
       "Bash(python -m pytest tests/test_ocr.py::TestThaiNameExtraction::test_extract_labeled_line_with_nang_sao tests/test_ocr.py::TestThaiNameExtraction::test_extract_labeled_line_with_dek_ying tests/test_ocr.py::TestThaiNameExtraction::test_extract_labeled_line_separate_fields -v)",
       "Bash(python -m pytest tests/test_ocr.py -k \"labeled\" -v)",
-      "Bash(python -m pytest tests/ -v)"
+      "Bash(python -m pytest tests/ -v)",
+      "Bash(python -m pytest tests/test_ocr.py::TestTitleRemoval::test_remove_nay_title -v)",
+      "Bash(python -m pytest tests/test_audit.py -v)"
     ]
   }
 }
