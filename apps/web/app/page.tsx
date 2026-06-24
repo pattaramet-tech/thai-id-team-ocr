@@ -1,15 +1,45 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import Header from "@/components/Header";
+
+interface User {
+  id: number;
+  username: string;
+  display_name: string;
+  role: string;
+}
+
 export default function Home() {
+  const [user, setUser] = useState<User | null>(null);
+
+  useEffect(() => {
+    checkAuth();
+  }, []);
+
+  const checkAuth = async () => {
+    try {
+      const token = localStorage.getItem("token");
+      if (!token) {
+        return;
+      }
+
+      const res = await fetch("http://localhost:8000/auth/me", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (res.ok) {
+        const userData = await res.json();
+        setUser(userData);
+      }
+    } catch (err) {
+      console.error("Auth check failed:", err);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
-      <nav className="bg-white shadow">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between h-16">
-            <div className="flex items-center">
-              <h1 className="text-xl font-bold text-gray-900">Thai ID Team OCR</h1>
-            </div>
-          </div>
-        </div>
-      </nav>
+      <Header user={user} />
 
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-12">
         <div className="text-center">

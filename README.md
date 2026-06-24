@@ -45,12 +45,43 @@ A local-first web application for competition admins to securely extract Thai fi
 - Duplicate name detection and warnings
 - Verified player count statistics
 
-### Phase 4: Advanced Features (Future)
+### Phase 3: Export XLSX ✅
+- Export verified players to Excel
+- Single team or all teams export
+- Professional formatting with headers
+- Duplicate name detection and warnings
+- Verified player count statistics
+
+### Phase 4: Local Authentication + Roles + Permission Control ✅
+- Local user authentication (no backend required)
+- User login with role-based access
+- Role types: admin, operator, viewer
+- Permission matrix for each role
+- Audit logging for all operations
+- Password hashing with Argon2
+
+### Phase 5: Local Production Packaging + Backup/Restore + System Health ✅
+- Database backup and restore functionality
+- Zip Slip vulnerability prevention
+- Automatic temp directory cleanup
+- System health monitoring endpoint
+- Local packaging for distribution
+
+### Phase 5.1: Admin UI for Backup, Restore, System Health, and Local Help ✅
+- Admin dashboard with system health status
+- Backup creation with export inclusion option
+- Backup/restore management UI
+- Delete backup functionality
+- Restore confirmation with phrase verification
+- Local help and setup guide
+- Thai language UI labels
+- Authentication and authorization checks
+
+### Phase 4+: Advanced Features (Future)
 - Batch upload with progress indicator
-- Fuzzy duplicate detection
 - Team-specific OCR confidence thresholds
-- Audit log for all operations
-- User authentication and roles
+- User management and roles configuration
+- Desktop app wrapper (Electron/Tauri)
 
 ## 🛠️ Tech Stack
 
@@ -388,6 +419,77 @@ type: short description
 Types: feat, fix, docs, refactor, test, chore
 ```
 
+## 🧪 Phase 5.1 Testing Checklist
+
+### Admin Access & Authorization
+- [ ] Admin can navigate to `/admin/system` page
+- [ ] Operator/Viewer cannot access admin pages (redirects to home)
+- [ ] Login required to access admin pages
+- [ ] User info displays correctly in header
+
+### System Health Page
+- [ ] App version displays correctly (v0.5.0)
+- [ ] Database status shows "healthy"
+- [ ] All directories show "พร้อมใช้งาน" (ok)
+- [ ] Tesseract status shows correct installation status
+- [ ] Thai language data shows correct status
+- [ ] Poppler status shows correctly (warning if not installed)
+- [ ] Statistics show correct counts (teams, players, audit logs)
+- [ ] Disk usage shows correctly in MB
+- [ ] Status badges use correct Thai labels and colors
+
+### Backup & Restore Page
+- [ ] Create backup button works
+- [ ] `include_exports` checkbox defaults to unchecked
+- [ ] Backup file appears in list after creation
+- [ ] Backup filename, date, and size display correctly
+- [ ] Download button downloads backup file
+- [ ] Delete button removes backup after confirmation
+- [ ] Delete requires confirmation modal
+- [ ] Restore button opens confirmation modal
+- [ ] Restore modal requires typing "RESTORE_CONFIRM"
+- [ ] Restore works successfully (database is restored)
+- [ ] After restore, shows message to restart backend
+- [ ] include_exports checkbox works when checked
+- [ ] Backup file size increases when include_exports=true
+
+### Local Help Page
+- [ ] All 7 sections load correctly
+- [ ] Code blocks display with proper formatting
+- [ ] Thai labels are correct (สร้างไฟล์สำรอง, ฟื้นฟูข้อมูล, etc.)
+- [ ] Installation instructions are clear
+- [ ] Setup guide is comprehensive
+- [ ] Privacy checklist displays all items
+
+### Header Navigation
+- [ ] Main nav shows: ทีม, Upload & OCR, Review, Export
+- [ ] Admin nav shows: สถานะระบบ, สำรองข้อมูล, คู่มือ (admin only)
+- [ ] User info shows correct username and role
+- [ ] Logout button works and clears token
+- [ ] Active page highlights in nav
+
+### Security
+- [ ] /system/health requires admin token (test with curl)
+- [ ] Restore requires confirmation phrase "RESTORE_CONFIRM"
+- [ ] Backup files have .zip extension only
+- [ ] Path traversal attempts blocked (../../../ etc)
+- [ ] No password/token in response
+- [ ] No Thai ID numbers displayed anywhere
+
+### Performance
+- [ ] System health page loads in < 2 seconds
+- [ ] Backup list loads quickly
+- [ ] No console errors in browser
+- [ ] No TypeScript errors on build
+
+### Edge Cases
+- [ ] Create backup works with include_exports=true
+- [ ] Create backup works with include_exports=false (default)
+- [ ] Download works for large backup files
+- [ ] Restore works from different backup
+- [ ] Delete backup when no backups left shows "ยังไม่มีไฟล์สำรอง"
+- [ ] Unauthorized access redirects to login
+
 ## 📞 Support
 
 - Check **CLAUDE.md** for project requirements
@@ -401,6 +503,6 @@ This project is created for competition administration purposes with strict priv
 
 ---
 
-**Status:** Phase 0.1 Foundation (In Progress)  
-**Last Updated:** 2026-06-23  
+**Status:** Phase 5.1 Admin UI (Complete) ✅  
+**Last Updated:** 2026-06-25  
 **Repository:** https://github.com/pattaramet-tech/thai-id-team-ocr
