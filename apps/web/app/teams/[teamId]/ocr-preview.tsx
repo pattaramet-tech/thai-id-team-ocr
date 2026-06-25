@@ -15,6 +15,8 @@ interface FieldCandidate {
   score: number;
   parser: string;
   warnings: string[];
+  isValid?: boolean;
+  showInUI?: boolean;
 }
 
 interface OCRDebugInfo {
@@ -102,6 +104,7 @@ export function OCRPreview({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"structured" | "candidates" | "confidence" | "debug" | "raw">("structured");
+  const [showRejectedCandidates, setShowRejectedCandidates] = useState(false);
 
   // Edit state
   const [editedFirstName, setEditedFirstName] = useState<string>("");
@@ -152,8 +155,17 @@ export function OCRPreview({
       MISSING_DATE_OF_BIRTH: "ไม่พบวันเกิด",
       LOW_OCR_CONFIDENCE: "ความมั่นใจต่ำ",
       FULL_OCR_FALLBACK_ONLY: "ใช้ OCR แบบเดิมเท่านั้น",
+      LABELED_FALLBACK_USED: "ใช้ข้อมูลจากข้อความ OCR ที่มี label ชัดเจน",
+      INVALID_CANDIDATE_REJECTED: "ตัดตัวเลือกที่ไม่ถูกต้องออกแล้ว",
+      NO_VALID_CANDIDATES: "ไม่มีตัวเลือกที่ใช้งานได้",
+      ROI_MISALIGNED_SUSPECTED: "ตำแหน่ง ROI อาจคลาดเคลื่อน",
     };
     return translations[reason] || reason;
+  };
+
+  // Redact Thai ID numbers (secondary safety measure)
+  const redactThaiIDNumbers = (text: string): string => {
+    return text.replace(/\d{13}/g, "[REDACTED_ID]");
   };
 
   // Handle candidate selection
@@ -391,15 +403,30 @@ export function OCRPreview({
           <div className="space-y-6">
             {(() => {
               const fieldCandidates = preview.field_candidates || preview.debugInfo?.fieldCandidates;
-              return fieldCandidates ? (
-                Object.entries(fieldCandidates).map(([fieldName, candidates]) => {
-                  if (candidates.length === 0) return null;
-                  return (
-                    <div key={fieldName} className="border rounded-lg p-4">
-                      <h4 className="font-semibold text-gray-900 mb-3">{fieldName}</h4>
-                      <div className="space-y-2">
-                        {candidates.map((candidate, idx) => (
-                          <div key={idx} className="bg-gray-50 p-3 rounded border border-gray-200">
+              if (!fieldCandidates) {
+                return <p className="text-gray-600">ไม่มี candidates สำหรับการเลือก</p>;
+              }
+
+              return Object.entries(fieldCandidates).map(([fieldName, candidates]) => {
+                if (candidates.length === 0) return null;
+
+                // Split candidates into usable and rejected
+                const usableCandidates = candidates.filter(
+                  (c) => (c.showInUI !== false && c.isValid !== false && c.score > 0)
+                );
+                const rejectedCandidates = candidates.filter(
+                  (c) => c.showInUI === false || c.isValid === false || c.score <= 0
+                );
+
+                return (
+                  <div key={fieldName} className="border rounded-lg p-4">
+                    <h4 className="font-semibold text-gray-900 mb-3">{fieldName}</h4>
+
+                    {/* Usable Candidates */}
+                    {usableCandidates.length > 0 ? (
+                      <div className="space-y-2 mb-4">
+                        {usableCandidates.map((candidate, idx) => (
+                          <div key={idx} className="bg-blue-50 p-3 rounded border border-blue-200">
                             <div className="flex justify-between items-start mb-2">
                               <div className="flex-1">
                                 <p className="font-medium text-gray-900">
@@ -408,17 +435,21 @@ export function OCRPreview({
                                     : candidate.value || "(ว่าง)"}
                                 </p>
                                 <p className="text-xs text-gray-600 mt-1">
-                                  Raw: {candidate.rawText.substring(0, 50)}...
+                                  Raw: {redactThaiIDNumbers(candidate.rawText.substring(0, 60))}
+                                  {candidate.rawText.length > 60 ? "..." : ""}
                                 </p>
                                 <div className="flex gap-4 mt-2 text-xs text-gray-600">
                                   <span>V: {candidate.templateVersion}</span>
                                   <span>Score: {candidate.score.toFixed(1)}</span>
                                   <span>Conf: {(candidate.confidence * 100).toFixed(0)}%</span>
+                                  {candidate.source === "labeled_full_ocr" && (
+                                    <span className="text-blue-600 font-semibold">Labeled</span>
+                                  )}
                                 </div>
                               </div>
                               <button
                                 onClick={() => selectCandidate(candidate)}
-                                className="ml-2 rounded bg-blue-500 px-3 py-1 text-sm text-white hover:bg-blue-600"
+                                className="ml-2 rounded bg-blue-500 px-3 py-1 text-sm text-white hover:bg-blue-600 whitespace-nowrap"
                               >
                                 ใช้
                               </button>
@@ -426,12 +457,53 @@ export function OCRPreview({
                           </div>
                         ))}
                       </div>
-                    </div>
-                  );
-                })
-              ) : (
-                <p className="text-gray-600">ไม่มี candidates สำหรับการเลือก</p>
-              );
+                    ) : (
+                      <div className="bg-orange-50 border border-orange-200 rounded p-3 mb-4">
+                        <p className="text-sm text-orange-800">ไม่มีตัวเลือกที่ใช้งานได้สำหรับ {fieldName}</p>
+                      </div>
+                    )}
+
+                    {/* Rejected Candidates - Collapsible */}
+                    {rejectedCandidates.length > 0 && (
+                      <details className="border border-red-200 rounded-lg bg-red-50">
+                        <summary className="cursor-pointer p-3 font-medium text-red-900">
+                          ✕ Candidates ที่ถูกปฏิเสธ ({rejectedCandidates.length})
+                        </summary>
+                        <div className="border-t border-red-200 p-3 space-y-2">
+                          {rejectedCandidates.map((candidate, idx) => (
+                            <div key={idx} className="bg-red-100 p-3 rounded border border-red-300 opacity-75">
+                              <div className="flex justify-between items-start mb-2">
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <span className="inline-block px-2 py-1 bg-red-600 text-white text-xs font-semibold rounded">
+                                      Rejected
+                                    </span>
+                                    {candidate.warnings && candidate.warnings.length > 0 && (
+                                      <span className="text-xs text-red-800">{candidate.warnings[0]}</span>
+                                    )}
+                                  </div>
+                                  <p className="font-medium text-gray-900 line-through opacity-60">
+                                    {typeof candidate.value === "object" && candidate.value
+                                      ? `${candidate.value.first} ${candidate.value.last}`
+                                      : candidate.value || "(ว่าง)"}
+                                  </p>
+                                  <p className="text-xs text-gray-600 mt-1">
+                                    Raw: {redactThaiIDNumbers(candidate.rawText.substring(0, 60))}
+                                  </p>
+                                  <div className="flex gap-4 mt-2 text-xs text-gray-600">
+                                    <span>Score: {candidate.score.toFixed(1)}</span>
+                                    <span>Valid: {candidate.isValid ? "✓" : "✗"}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </details>
+                    )}
+                  </div>
+                );
+              });
             })()}
           </div>
         )}
