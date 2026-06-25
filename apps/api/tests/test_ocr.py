@@ -666,18 +666,25 @@ class TestStructuredConfidenceScoring:
 
     def test_candidate_score_from_roi(self):
         """Candidate from ROI gets high score."""
-        from app.services.id_ocr_structured import FieldCandidate, FieldSource
+        from app.services.id_ocr_structured import FieldCandidate
+        from app.services.id_card_template import thai_id_template_manager
+
+        field_config = thai_id_template_manager.get_field_config("english_first_name")
         candidate = FieldCandidate(
-            fieldName="firstName",
+            fieldName="english_first_name",
             value="John",
-            source=FieldSource.ENGLISH_FIRST_ROI,
+            rawText="John",
+            normalizedText="John",
+            source="roi_template",
+            templateVersion="template_v1",
+            roiName="english_first_name",
             confidence=0.9,
-            evidenceText="John",
-            parser="parse_english_name_from_roi"
+            parser="parse_english_name_from_roi",
+            warnings=[]
         )
-        score = OCRService.calculate_candidate_score(candidate)
-        # ROI(40) + confidence(27) + length(10) = 77
-        assert score > 60
+        OCRService.score_field_candidate(candidate, field_config)
+        # ROI(40) + value parsed(20) + confidence(27) + length(10) = 97
+        assert candidate.score > 80
 
 
 class TestThaiIDTemplateExtraction:
@@ -727,6 +734,152 @@ class TestThaiIDTemplateExtraction:
         # When card not detected, roi_results should be empty dict
         if not result.get("card_warped"):
             assert isinstance(result["roi_results"], dict)
+
+
+class TestMultiPresetExtraction:
+    """Test multi-preset field candidate extraction."""
+
+    def test_extract_field_candidates_returns_dict(self):
+        """Extract field candidates should return dict with field names."""
+        import cv2
+        import numpy as np
+        from app.services.id_card_template import thai_id_template_manager
+
+        img = np.ones((630, 1000, 3), dtype=np.uint8) * 255
+        _, buffer = cv2.imencode('.jpg', img)
+        image_bytes = buffer.tobytes()
+
+        # Convert bytes to ndarray for warped_image
+        import cv2
+        img_array = cv2.imdecode(np.frombuffer(image_bytes, np.uint8), cv2.IMREAD_COLOR)
+
+        candidates = OCRService.extract_field_candidates_from_templates(img_array)
+
+        # Should return dict with all field names
+        field_names = thai_id_template_manager.get_all_field_names()
+        for field_name in field_names:
+            assert field_name in candidates
+            assert isinstance(candidates[field_name], list)
+
+    def test_extract_field_candidates_sorted_by_score(self):
+        """Field candidates should be sorted by score (highest first)."""
+        import cv2
+        import numpy as np
+
+        img = np.ones((630, 1000, 3), dtype=np.uint8) * 255
+        _, buffer = cv2.imencode('.jpg', img)
+        image_bytes = buffer.tobytes()
+
+        img_array = cv2.imdecode(np.frombuffer(image_bytes, np.uint8), cv2.IMREAD_COLOR)
+        candidates = OCRService.extract_field_candidates_from_templates(img_array)
+
+        # Check that any field with candidates has them sorted by score
+        for field_name, cands in candidates.items():
+            if len(cands) > 1:
+                for i in range(len(cands) - 1):
+                    assert cands[i].score >= cands[i + 1].score
+
+    def test_score_field_candidate_roi_bonus(self):
+        """Field candidate from ROI template should get +40 score bonus."""
+        from app.services.id_ocr_structured import FieldCandidate
+        from app.services.id_card_template import thai_id_template_manager
+
+        field_config = thai_id_template_manager.get_field_config("english_first_name")
+        candidate = FieldCandidate(
+            fieldName="english_first_name",
+            value="John",
+            rawText="John",
+            normalizedText="John",
+            source="roi_template",
+            templateVersion="template_v1",
+            roiName="english_first_name",
+            confidence=0.8,
+            parser="parse_english_name_from_roi",
+            warnings=[]
+        )
+
+        OCRService.score_field_candidate(candidate, field_config)
+
+        # Should have ROI bonus(40) + value parsed(20) + confidence(24) + length(10) = 94
+        assert candidate.score >= 80
+
+    def test_select_best_fields_prefers_thai_names(self):
+        """Select best fields should prefer Thai names when score > 50."""
+        from app.services.id_ocr_structured import FieldCandidate
+
+        thai_candidate = FieldCandidate(
+            fieldName="thai_full_name",
+            value=("สมชาย", "วิชัยกุล"),
+            rawText="สมชาย วิชัยกุล",
+            normalizedText="สมชาย วิชัยกุล",
+            source="roi_template",
+            templateVersion="template_v1",
+            roiName="thai_full_name",
+            confidence=0.9,
+            parser="parse_thai_full_name_from_roi",
+            score=80.0
+        )
+
+        eng_first_candidate = FieldCandidate(
+            fieldName="english_first_name",
+            value="John",
+            rawText="John",
+            normalizedText="John",
+            source="roi_template",
+            templateVersion="template_v1",
+            roiName="english_first_name",
+            confidence=0.8,
+            parser="parse_english_name_from_roi",
+            score=70.0
+        )
+
+        field_candidates = {
+            "thai_full_name": [thai_candidate],
+            "english_first_name": [eng_first_candidate],
+            "english_last_name": [],
+            "dob_thai": [],
+            "dob_english": [],
+            "expiry_thai": [],
+            "expiry_english": []
+        }
+
+        first, last, dob = OCRService.select_best_fields(field_candidates)
+
+        # Should prefer Thai names
+        assert first == "สมชาย"
+        assert last == "วิชัยกุล"
+
+    def test_select_best_fields_fallback_to_english(self):
+        """Select best fields should fallback to English when Thai weak."""
+        from app.services.id_ocr_structured import FieldCandidate
+
+        eng_first_candidate = FieldCandidate(
+            fieldName="english_first_name",
+            value="John",
+            rawText="John",
+            normalizedText="John",
+            source="roi_template",
+            templateVersion="template_v1",
+            roiName="english_first_name",
+            confidence=0.8,
+            parser="parse_english_name_from_roi",
+            score=70.0
+        )
+
+        field_candidates = {
+            "thai_full_name": [],
+            "english_first_name": [eng_first_candidate],
+            "english_last_name": [],
+            "dob_thai": [],
+            "dob_english": [],
+            "expiry_thai": [],
+            "expiry_english": []
+        }
+
+        first, last, dob = OCRService.select_best_fields(field_candidates)
+
+        # Should fallback to English when Thai not available
+        assert first == "John"
 
 
 if __name__ == "__main__":

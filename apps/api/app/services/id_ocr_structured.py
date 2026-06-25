@@ -38,14 +38,17 @@ class ReviewReasonCode(str, Enum):
 @dataclass
 class FieldCandidate:
     """A candidate value for a field with source and confidence."""
-    fieldName: str  # firstName | lastName | dateOfBirth
+    fieldName: str  # thai_full_name | english_first_name | etc.
     value: Any  # string or date
-    source: FieldSource
-    confidence: float  # 0.0-1.0
-    evidenceText: str  # redacted text snippet
+    rawText: str  # Original OCR text (redacted)
+    normalizedText: str  # Cleaned text for processing
+    source: str  # roi_template | full_ocr | etc.
+    templateVersion: str  # V1 | V2 | V3 | N/A
+    roiName: str  # Field name used for extraction
+    confidence: float  # 0.0-1.0 from OCR
     parser: str  # e.g., "parse_thai_full_name_from_roi"
     warnings: List[str] = field(default_factory=list)
-    score: float = 0.0  # calculated score
+    score: float = 0.0  # calculated score (0-150+)
 
 
 @dataclass

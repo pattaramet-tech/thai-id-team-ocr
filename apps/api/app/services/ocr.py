@@ -11,6 +11,9 @@ from pdf2image import convert_from_bytes
 from app.services.id_ocr_structured import (
     FieldCandidate, IDOCRStructuredResult, FieldSource, ReviewReasonCode
 )
+from app.services.id_card_template import (
+    thai_id_template_manager, TemplateVersion
+)
 
 logger = logging.getLogger(__name__)
 
@@ -950,6 +953,181 @@ class OCRService:
         return round(ocr_conf * 0.4 + structured_conf * 0.6, 2)
 
     @staticmethod
+    def extract_field_candidates_from_templates(warped_image: np.ndarray) -> Dict[str, List[FieldCandidate]]:
+        """Extract field candidates using multiple ROI preset versions.
+
+        Returns dict: fieldName -> List[FieldCandidate] ordered by score (highest first)
+        """
+        candidates = {field_name: [] for field_name in thai_id_template_manager.get_all_field_names()}
+
+        # Try each template version
+        for template_version in [TemplateVersion.V1, TemplateVersion.V2, TemplateVersion.V3]:
+            for field_name in thai_id_template_manager.get_all_field_names():
+                try:
+                    field_config = thai_id_template_manager.get_field_config(field_name)
+                    roi_def = thai_id_template_manager.get_roi(field_name, template_version)
+
+                    if not roi_def or not field_config:
+                        continue
+
+                    # Extract ROI
+                    roi_coords = roi_def.to_tuple()
+                    roi_text, confidence = OCRService.extract_from_roi(
+                        warped_image, field_name, roi_coords,
+                        lang=field_config.language, psm=field_config.psm
+                    )
+
+                    if not roi_text:
+                        continue
+
+                    # Parse value
+                    normalized_text = OCRService.normalize_stacked_thai_ocr_text(roi_text)
+                    parser_method = getattr(OCRService, field_config.parser, None)
+
+                    value = None
+                    if parser_method:
+                        if "date" in field_config.parser.lower():
+                            value = parser_method(normalized_text)
+                        else:
+                            value = parser_method(normalized_text)
+
+                    # Create candidate
+                    candidate = FieldCandidate(
+                        fieldName=field_name,
+                        value=value,
+                        rawText=OCRService.redact_thai_id_numbers(roi_text),
+                        normalizedText=normalized_text,
+                        source="roi_template",
+                        templateVersion=template_version.value,
+                        roiName=field_name,
+                        confidence=confidence,
+                        parser=field_config.parser,
+                        warnings=[]
+                    )
+
+                    # Score candidate
+                    OCRService.score_field_candidate(candidate, field_config)
+                    candidates[field_name].append(candidate)
+
+                except Exception as e:
+                    logger.debug(f"Failed to extract {field_name} from {template_version}: {e}")
+                    continue
+
+        # Sort candidates by score (highest first)
+        for field_name in candidates:
+            candidates[field_name].sort(key=lambda c: c.score, reverse=True)
+
+        return candidates
+
+    @staticmethod
+    def score_field_candidate(candidate: FieldCandidate, field_config) -> float:
+        """Score a field candidate.
+
+        Scoring (0-150+):
+        +40 ROI source
+        +20 V2 template (better for card-like)
+        +20 value parsed successfully
+        +20 pattern matches
+        +0-30 OCR confidence
+        +10 not forbidden/noise
+        +10 good length
+        """
+        score = 0.0
+
+        # Source bonus
+        if candidate.source == "roi_template":
+            score += 40
+
+        # Template version bonus
+        if candidate.templateVersion == TemplateVersion.V2.value:
+            score += 20
+
+        # Parse success
+        if candidate.value is not None:
+            score += 20
+
+        # Pattern match
+        if field_config.expectedPattern:
+            if re.search(field_config.expectedPattern, candidate.normalizedText):
+                score += 20
+
+        # Confidence bonus (0-30 based on confidence)
+        score += candidate.confidence * 30
+
+        # Not forbidden word
+        if isinstance(candidate.value, str):
+            if not any(word in candidate.value.lower() for word in ["date", "birth", "identification", "card"]):
+                score += 10
+
+            # Good length
+            if 2 < len(candidate.value) <= 30:
+                score += 10
+
+        candidate.score = min(score, 150.0)
+        return candidate.score
+
+    @staticmethod
+    def select_best_fields(field_candidates: Dict[str, List[FieldCandidate]]) -> Tuple[Optional[str], Optional[str], Optional[date]]:
+        """Select the best candidate for each field.
+
+        Rules:
+        - firstName: prefer Thai candidate from thai_full_name if score > 50, else English
+        - lastName: prefer Thai candidate from thai_full_name if score > 50, else English
+        - dateOfBirth: prefer dob_english if parsed, else dob_thai
+
+        Returns: (firstName, lastName, dateOfBirth)
+        """
+        first_name = None
+        last_name = None
+        dob = None
+
+        # Extract first/last name
+        thai_candidates = field_candidates.get("thai_full_name", [])
+        eng_first_candidates = field_candidates.get("english_first_name", [])
+        eng_last_candidates = field_candidates.get("english_last_name", [])
+
+        # Try Thai names first
+        for candidate in thai_candidates:
+            if candidate.value and isinstance(candidate.value, tuple):
+                thai_first, thai_last = candidate.value
+                if candidate.score >= 50 and thai_first:
+                    first_name = thai_first
+                    last_name = thai_last
+                    break
+
+        # Fallback to English
+        if not first_name and eng_first_candidates:
+            for candidate in eng_first_candidates:
+                if candidate.value:
+                    first_name = candidate.value
+                    break
+
+        if not last_name and eng_last_candidates:
+            for candidate in eng_last_candidates:
+                if candidate.value:
+                    last_name = candidate.value
+                    break
+
+        # Extract date of birth
+        dob_english_candidates = field_candidates.get("dob_english", [])
+        dob_thai_candidates = field_candidates.get("dob_thai", [])
+
+        # Prefer English DOB
+        for candidate in dob_english_candidates:
+            if isinstance(candidate.value, date):
+                dob = candidate.value
+                break
+
+        # Fallback to Thai DOB
+        if not dob:
+            for candidate in dob_thai_candidates:
+                if isinstance(candidate.value, date):
+                    dob = candidate.value
+                    break
+
+        return first_name, last_name, dob
+
+    @staticmethod
     def extract_from_thai_id_template(image_bytes: bytes) -> Dict:
         """Extract data from Thai ID card using template ROI approach.
 
@@ -969,6 +1147,7 @@ class OCRService:
         roi_results = {}
         card_detected = False
         card_warped = False
+        card_like_fallback_used = False
 
         try:
             # Get full OCR text for fallback checks
@@ -999,61 +1178,42 @@ class OCRService:
                     warnings.append("ไม่พบกรอบบัตรประชาชน กรุณากรอกชื่อเอง")
                     card_detected = False
 
-            # Extract from ROIs if card was detected, warped, or card-like fallback
+            # Extract from ROIs using template manager if card was detected, warped, or card-like fallback
             if warped_card is not None:
-                # Choose ROI preset based on extraction mode
-                roi_preset = THAI_ID_CARD_ROIS if not card_like_fallback_used else THAI_ID_CARD_ROIS_V2
+                # Use template manager to extract field candidates from multiple versions
+                field_candidates = OCRService.extract_field_candidates_from_templates(warped_card)
 
-                # Extract Thai name
-                thai_name_text, thai_name_conf = OCRService.extract_from_roi(
-                    warped_card, "thai_name_line", roi_preset["thai_name_line"], lang="tha+eng", psm=6
-                )
-                # Normalize stacked Thai characters if needed
-                thai_name_text = OCRService.normalize_stacked_thai_ocr_text(thai_name_text)
-                thai_first, thai_last = OCRService.parse_thai_full_name_from_roi(thai_name_text)
+                # Select best candidates for each field
+                first_name, last_name, dob = OCRService.select_best_fields(field_candidates)
 
-                # Extract English names
-                eng_first_text, eng_first_conf = OCRService.extract_from_roi(
-                    warped_card, "english_first_name", roi_preset["english_first_name"], lang="eng", psm=7
-                )
-                eng_first = OCRService.parse_english_name_from_roi(eng_first_text)
+                # Prepare debug info with candidates
+                candidate_debug = {}
+                for field_name, candidates in field_candidates.items():
+                    if candidates:
+                        best = candidates[0]  # Already sorted by score
+                        candidate_debug[field_name] = {
+                            "value": str(best.value),
+                            "confidence": best.confidence,
+                            "score": best.score,
+                            "templateVersion": best.templateVersion
+                        }
 
-                eng_last_text, eng_last_conf = OCRService.extract_from_roi(
-                    warped_card, "english_last_name", roi_preset["english_last_name"], lang="eng", psm=7
-                )
-                eng_last = OCRService.parse_english_name_from_roi(eng_last_text)
+                # Calculate average confidence from all candidates
+                all_confidences = []
+                for candidates in field_candidates.values():
+                    for c in candidates:
+                        if c.confidence > 0:
+                            all_confidences.append(c.confidence)
 
-                # Extract DOB
-                dob_thai_text, dob_thai_conf = OCRService.extract_from_roi(
-                    warped_card, "dob_thai", roi_preset["dob_thai"], lang="tha+eng", psm=7
-                )
-                dob_eng_text, dob_eng_conf = OCRService.extract_from_roi(
-                    warped_card, "dob_english", roi_preset["dob_english"], lang="eng", psm=7
-                )
-                dob = OCRService.extract_dob_from_rois(dob_eng_text, dob_thai_text)
+                avg_confidence = sum(all_confidences) / len(all_confidences) if all_confidences else 0.0
 
-                # Store ROI results
-                roi_results = {
-                    "thai_name_line": {"text": OCRService.redact_thai_id_numbers(thai_name_text), "confidence": thai_name_conf},
-                    "english_first_name": {"text": OCRService.redact_thai_id_numbers(eng_first_text), "confidence": eng_first_conf},
-                    "english_last_name": {"text": OCRService.redact_thai_id_numbers(eng_last_text), "confidence": eng_last_conf},
-                    "dob_thai": {"text": OCRService.redact_thai_id_numbers(dob_thai_text), "confidence": dob_thai_conf},
-                    "dob_english": {"text": OCRService.redact_thai_id_numbers(dob_eng_text), "confidence": dob_eng_conf},
-                }
-
-                # Determine final names (prioritize Thai, fallback to English)
-                first_name = thai_first or eng_first
-                last_name = thai_last or eng_last
-
-                if not thai_first and eng_first:
-                    warnings.append("ไม่พบชื่อภาษาไทยจาก OCR ใช้ชื่อภาษาอังกฤษเป็นข้อมูลอ้างอิง กรุณาตรวจสอบ")
-
+                # Check for missing fields
+                if not first_name:
+                    warnings.append("ไม่พบชื่อจริง กรุณากรอกเอง")
+                if not last_name:
+                    warnings.append("ไม่พบนามสกุล กรุณากรอกเอง")
                 if not dob:
-                    warnings.append("ไม่พบวันเกิดจาก OCR กรุณากรอกเอง")
-
-                # Calculate average confidence
-                confidences = [v.get("confidence", 0) for _, v in roi_results.items() if isinstance(v, dict) and v.get("confidence", 0) > 0]
-                avg_confidence = sum(confidences) / len(confidences) if confidences else 0.0
+                    warnings.append("ไม่พบวันเกิด กรุณากรอกเอง")
 
                 return {
                     "success": True,
@@ -1067,6 +1227,8 @@ class OCRService:
                     "date_of_birth": dob,
                     "confidence": avg_confidence,
                     "roi_results": roi_results,
+                    "candidate_debug": candidate_debug,
+                    "field_candidates": field_candidates,
                     "warnings": warnings
                 }
 
