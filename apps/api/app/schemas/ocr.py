@@ -12,8 +12,11 @@ class OCRDebugInfo(BaseModel):
     cardDetected: Optional[bool] = None  # Whether Thai ID card was detected with contours
     cardWarped: Optional[bool] = None  # Whether card was successfully warped
     cardLikeFallbackUsed: Optional[bool] = None  # Whether card-like fallback was used
-    roiPresetUsed: Optional[str] = None  # "v1" or "v2" ROI preset
+    roiPresetUsed: Optional[str] = None  # "v1", "v2", "v3" ROI preset
     roiResults: Optional[Dict[str, Any]] = None  # Individual ROI extraction results
+    fieldCandidates: Optional[Dict[str, Any]] = None  # All field candidates from structured extraction
+    selectedCandidates: Optional[Dict[str, Any]] = None  # Best selected candidate per field
+    reviewReasons: Optional[List[str]] = None  # Reasons for manual review
 
 class OCRPreviewResponse(BaseModel):
     """OCR preview result before saving to database."""
@@ -28,6 +31,15 @@ class OCRPreviewResponse(BaseModel):
     eligibilityStatus: str  # eligible | over_age | unknown
     eligibilityNote: Optional[str]
     warnings: List[str]  # Warnings about OCR quality or missing data
+    # Structured OCR fields
+    extraction_mode: Optional[str] = None
+    roi_preset: Optional[str] = None
+    card_detected: Optional[bool] = None
+    card_warped: Optional[bool] = None
+    card_like_fallback_used: Optional[bool] = None
+    field_candidates: Optional[Dict[str, Any]] = None
+    selected_candidates: Optional[Dict[str, Any]] = None
+    review_reasons: Optional[List[str]] = None
     debugInfo: Optional[OCRDebugInfo] = None  # For debugging/support
 
     class Config:
@@ -49,6 +61,15 @@ class OCRBatchItemResponse(BaseModel):
     eligibilityStatus: Optional[str] = None  # eligible | over_age | unknown
     eligibilityNote: Optional[str] = None
     warnings: Optional[List[str]] = None
+    # Structured OCR fields
+    extraction_mode: Optional[str] = None
+    roi_preset: Optional[str] = None
+    card_detected: Optional[bool] = None
+    card_warped: Optional[bool] = None
+    card_like_fallback_used: Optional[bool] = None
+    field_candidates: Optional[Dict[str, Any]] = None
+    selected_candidates: Optional[Dict[str, Any]] = None
+    review_reasons: Optional[List[str]] = None
     debugInfo: Optional[OCRDebugInfo] = None  # For debugging/support
 
     class Config:

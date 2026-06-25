@@ -8,7 +8,7 @@ from app.services.eligibility import date_to_birth_year_be, check_eligibility_fo
 from app.services.duplicates import DuplicateDetectionService
 from app.schemas.ocr import OCRPreviewResponse, OCRBatchResponse, OCRBatchItemResponse, OCRDebugInfo
 from datetime import datetime, date
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Any, Dict
 
 router = APIRouter()
 
@@ -18,6 +18,20 @@ MAX_BATCH_FILES = 30
 
 def allowed_file(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def parse_template_date(value: Any) -> Optional[date]:
+    """Parse date from template_result which may be ISO string or date object."""
+    if value is None:
+        return None
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        try:
+            return date.fromisoformat(value)
+        except (ValueError, AttributeError):
+            return None
+    return None
 
 
 def process_ocr_file(
@@ -51,15 +65,26 @@ def process_ocr_file(
         # Try Thai ID card template extraction first
         template_result = OCRService.extract_from_thai_id_template(image_bytes)
 
-        if template_result["success"] and template_result["card_warped"]:
+        # Extract structured fields from template_result
+        extraction_mode = template_result.get("extraction_mode", "full_ocr_fallback")
+        roi_preset = template_result.get("roi_preset")
+        card_detected = template_result.get("card_detected", False)
+        card_warped = template_result.get("card_warped", False)
+        card_like_fallback_used = template_result.get("card_like_fallback_used", False)
+        field_candidates = template_result.get("field_candidates", {})
+        selected_candidates = template_result.get("selected_candidates", {})
+        review_reasons = template_result.get("review_reasons", [])
+        roi_results = template_result.get("roi_results", {})
+        template_warnings = template_result.get("warnings", [])
+
+        # Parse date from template_result (may be ISO string)
+        date_of_birth = parse_template_date(template_result.get("date_of_birth"))
+
+        if template_result["success"] and template_result.get("card_warped"):
             # Use template extraction results
-            first_name = template_result["first_name"]
-            last_name = template_result["last_name"]
-            date_of_birth = template_result["date_of_birth"]
-            confidence = template_result["confidence"]
-            extraction_mode = "thai_id_template"
-            template_warnings = template_result.get("warnings", [])
-            roi_results = template_result.get("roi_results", {})
+            first_name = template_result.get("first_name")
+            last_name = template_result.get("last_name")
+            confidence = template_result.get("confidence", 0.0)
 
             # Get full OCR text for fallback/debug
             ocr_text, _, debug_info = OCRService.extract_text_with_confidence(image_bytes)
@@ -68,14 +93,21 @@ def process_ocr_file(
             # Fallback to full OCR
             ocr_text, confidence, debug_info = OCRService.extract_text_with_confidence(image_bytes)
             redacted_text = debug_info['ocr_text']
-            extraction_mode = "full_ocr_fallback"
-            template_warnings = template_result.get("warnings", [])
-            roi_results = {}
 
-            # Extract names from full OCR
-            first_name, last_name = OCRService.extract_thai_names(redacted_text)
-            # Extract date of birth
-            date_of_birth = OCRService.extract_date_of_birth(ocr_text)
+            # Extract names from full OCR only if template didn't provide them
+            if not template_result.get("first_name") or not template_result.get("last_name"):
+                first_name, last_name = OCRService.extract_thai_names(redacted_text)
+            else:
+                first_name = template_result.get("first_name")
+                last_name = template_result.get("last_name")
+
+            # Extract date of birth if not from template
+            if not date_of_birth:
+                date_of_birth = OCRService.extract_date_of_birth(ocr_text)
+
+            # Add full_ocr_fallback review reason if not already present
+            if "FULL_OCR_FALLBACK_ONLY" not in review_reasons:
+                review_reasons = list(review_reasons) + ["FULL_OCR_FALLBACK_ONLY"]
 
         # Calculate birth year BE if we have date
         birth_year_be = date_to_birth_year_be(date_of_birth) if date_of_birth else None
@@ -125,17 +157,29 @@ def process_ocr_file(
             eligibilityStatus=eligibility_result["status"],
             eligibilityNote=eligibility_result["note"],
             warnings=warnings,
+            # Structured OCR fields
+            extraction_mode=extraction_mode,
+            roi_preset=roi_preset,
+            card_detected=card_detected,
+            card_warped=card_warped,
+            card_like_fallback_used=card_like_fallback_used,
+            field_candidates=field_candidates if field_candidates else None,
+            selected_candidates=selected_candidates if selected_candidates else None,
+            review_reasons=review_reasons if review_reasons else None,
             debugInfo=OCRDebugInfo(
                 ocrText=debug_info['ocr_text'],
                 preprocessingMethod=debug_info['preprocessing_method'],
                 psmMode=debug_info['psm_mode'],
                 confidence=debug_info['confidence'],
                 extractionMode=extraction_mode,
-                cardDetected=template_result.get("card_detected"),
-                cardWarped=template_result.get("card_warped"),
-                cardLikeFallbackUsed=template_result.get("card_like_fallback_used"),
-                roiPresetUsed=template_result.get("roi_preset"),
-                roiResults=roi_results if roi_results else None
+                cardDetected=card_detected,
+                cardWarped=card_warped,
+                cardLikeFallbackUsed=card_like_fallback_used,
+                roiPresetUsed=roi_preset,
+                roiResults=roi_results if roi_results else None,
+                fieldCandidates=field_candidates if field_candidates else None,
+                selectedCandidates=selected_candidates if selected_candidates else None,
+                reviewReasons=review_reasons if review_reasons else None
             )
         ), None
 

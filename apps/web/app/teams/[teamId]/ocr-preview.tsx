@@ -17,6 +17,22 @@ interface FieldCandidate {
   warnings: string[];
 }
 
+interface OCRDebugInfo {
+  ocrText: string;
+  preprocessingMethod: string;
+  psmMode: number;
+  confidence: number;
+  extractionMode?: string;
+  cardDetected?: boolean;
+  cardWarped?: boolean;
+  cardLikeFallbackUsed?: boolean;
+  roiPresetUsed?: string;
+  roiResults?: Record<string, any>;
+  fieldCandidates?: Record<string, FieldCandidate[]>;
+  selectedCandidates?: Record<string, FieldCandidate>;
+  reviewReasons?: string[];
+}
+
 interface OCRPreview {
   sourceFilename: string;
   ocrText: string;
@@ -38,6 +54,7 @@ interface OCRPreview {
   field_candidates?: Record<string, FieldCandidate[]>;
   selected_candidates?: Record<string, FieldCandidate>;
   review_reasons?: string[];
+  debugInfo?: OCRDebugInfo;
 }
 
 interface OCRPreviewProps {
@@ -356,98 +373,128 @@ export function OCRPreview({
               </div>
             )}
 
-            {preview.field_candidates && Object.keys(preview.field_candidates).length > 0 && (
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                <p className="text-sm text-blue-900 mb-2">
-                  💡 ใช้ tab "ตัวเลือก" เพื่อเลือก candidate อื่นหากผลลัพธ์ไม่ถูกต้อง
-                </p>
-              </div>
-            )}
+            {(() => {
+              const fieldCandidates = preview.field_candidates || preview.debugInfo?.fieldCandidates;
+              return fieldCandidates && Object.keys(fieldCandidates).length > 0 && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <p className="text-sm text-blue-900 mb-2">
+                    💡 ใช้ tab "ตัวเลือก" เพื่อเลือก candidate อื่นหากผลลัพธ์ไม่ถูกต้อง
+                  </p>
+                </div>
+              );
+            })()}
           </div>
         )}
 
         {/* Candidates Tab */}
         {activeTab === "candidates" && (
           <div className="space-y-6">
-            {preview.field_candidates ? (
-              Object.entries(preview.field_candidates).map(([fieldName, candidates]) => {
-                if (candidates.length === 0) return null;
-                return (
-                  <div key={fieldName} className="border rounded-lg p-4">
-                    <h4 className="font-semibold text-gray-900 mb-3">{fieldName}</h4>
-                    <div className="space-y-2">
-                      {candidates.map((candidate, idx) => (
-                        <div key={idx} className="bg-gray-50 p-3 rounded border border-gray-200">
-                          <div className="flex justify-between items-start mb-2">
-                            <div className="flex-1">
-                              <p className="font-medium text-gray-900">
-                                {typeof candidate.value === "object" && candidate.value
-                                  ? `${candidate.value.first} ${candidate.value.last}`
-                                  : candidate.value || "(ว่าง)"}
-                              </p>
-                              <p className="text-xs text-gray-600 mt-1">
-                                Raw: {candidate.rawText.substring(0, 50)}...
-                              </p>
-                              <div className="flex gap-4 mt-2 text-xs text-gray-600">
-                                <span>V: {candidate.templateVersion}</span>
-                                <span>Score: {candidate.score.toFixed(1)}</span>
-                                <span>Conf: {(candidate.confidence * 100).toFixed(0)}%</span>
+            {(() => {
+              const fieldCandidates = preview.field_candidates || preview.debugInfo?.fieldCandidates;
+              return fieldCandidates ? (
+                Object.entries(fieldCandidates).map(([fieldName, candidates]) => {
+                  if (candidates.length === 0) return null;
+                  return (
+                    <div key={fieldName} className="border rounded-lg p-4">
+                      <h4 className="font-semibold text-gray-900 mb-3">{fieldName}</h4>
+                      <div className="space-y-2">
+                        {candidates.map((candidate, idx) => (
+                          <div key={idx} className="bg-gray-50 p-3 rounded border border-gray-200">
+                            <div className="flex justify-between items-start mb-2">
+                              <div className="flex-1">
+                                <p className="font-medium text-gray-900">
+                                  {typeof candidate.value === "object" && candidate.value
+                                    ? `${candidate.value.first} ${candidate.value.last}`
+                                    : candidate.value || "(ว่าง)"}
+                                </p>
+                                <p className="text-xs text-gray-600 mt-1">
+                                  Raw: {candidate.rawText.substring(0, 50)}...
+                                </p>
+                                <div className="flex gap-4 mt-2 text-xs text-gray-600">
+                                  <span>V: {candidate.templateVersion}</span>
+                                  <span>Score: {candidate.score.toFixed(1)}</span>
+                                  <span>Conf: {(candidate.confidence * 100).toFixed(0)}%</span>
+                                </div>
                               </div>
+                              <button
+                                onClick={() => selectCandidate(candidate)}
+                                className="ml-2 rounded bg-blue-500 px-3 py-1 text-sm text-white hover:bg-blue-600"
+                              >
+                                ใช้
+                              </button>
                             </div>
-                            <button
-                              onClick={() => selectCandidate(candidate)}
-                              className="ml-2 rounded bg-blue-500 px-3 py-1 text-sm text-white hover:bg-blue-600"
-                            >
-                              ใช้
-                            </button>
                           </div>
-                        </div>
-                      ))}
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                );
-              })
-            ) : (
-              <p className="text-gray-600">ไม่มี candidates สำหรับการเลือก</p>
-            )}
+                  );
+                })
+              ) : (
+                <p className="text-gray-600">ไม่มี candidates สำหรับการเลือก</p>
+              );
+            })()}
           </div>
         )}
 
         {/* Confidence Tab */}
         {activeTab === "confidence" && (
           <div className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="bg-gray-50 p-4 rounded">
-                <p className="text-sm text-gray-600">Extraction Mode</p>
-                <p className="font-semibold text-gray-900">{preview.extraction_mode || "N/A"}</p>
-              </div>
+            {(() => {
+              // Support both top-level fields and debugInfo fallback
+              const extractionMode = preview.extraction_mode || preview.debugInfo?.extractionMode || "N/A";
+              const roiPreset = preview.roi_preset || preview.debugInfo?.roiPresetUsed || "N/A";
+              const cardDetected = preview.card_detected !== undefined ? preview.card_detected : preview.debugInfo?.cardDetected ?? false;
+              const cardWarped = preview.card_warped !== undefined ? preview.card_warped : preview.debugInfo?.cardWarped ?? false;
+              const cardLikeFallbackUsed = preview.card_like_fallback_used !== undefined ? preview.card_like_fallback_used : preview.debugInfo?.cardLikeFallbackUsed ?? false;
+              const reviewReasons = preview.review_reasons || preview.debugInfo?.reviewReasons || [];
 
-              <div className="bg-gray-50 p-4 rounded">
-                <p className="text-sm text-gray-600">ROI Preset</p>
-                <p className="font-semibold text-gray-900">{preview.roi_preset || "N/A"}</p>
-              </div>
+              return (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="bg-gray-50 p-4 rounded">
+                      <p className="text-sm text-gray-600">Extraction Mode</p>
+                      <p className="font-semibold text-gray-900">{extractionMode}</p>
+                    </div>
 
-              <div className="bg-gray-50 p-4 rounded">
-                <p className="text-sm text-gray-600">Card Detected</p>
-                <p className="font-semibold text-gray-900">{preview.card_detected ? "✓ ใช่" : "✗ ไม่"}</p>
-              </div>
+                    <div className="bg-gray-50 p-4 rounded">
+                      <p className="text-sm text-gray-600">ROI Preset</p>
+                      <p className="font-semibold text-gray-900">{roiPreset}</p>
+                    </div>
 
-              <div className="bg-gray-50 p-4 rounded">
-                <p className="text-sm text-gray-600">Card-like Fallback</p>
-                <p className="font-semibold text-gray-900">{preview.card_like_fallback_used ? "✓ ใช่" : "✗ ไม่"}</p>
-              </div>
-            </div>
+                    <div className="bg-gray-50 p-4 rounded">
+                      <p className="text-sm text-gray-600">Card Detected</p>
+                      <p className="font-semibold text-gray-900">{cardDetected ? "✓ ใช่" : "✗ ไม่"}</p>
+                    </div>
 
-            {preview.review_reasons && preview.review_reasons.length > 0 && (
-              <div className="rounded-lg bg-orange-50 p-4 border border-orange-200">
-                <p className="text-sm font-semibold text-orange-900 mb-2">ต้องตรวจสอบ:</p>
-                <ul className="text-sm text-orange-800 space-y-1">
-                  {preview.review_reasons.map((reason, i) => (
-                    <li key={i}>• {translateReviewReason(reason)}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
+                    <div className="bg-gray-50 p-4 rounded">
+                      <p className="text-sm text-gray-600">Card Warped</p>
+                      <p className="font-semibold text-gray-900">{cardWarped ? "✓ ใช่" : "✗ ไม่"}</p>
+                    </div>
+
+                    <div className="bg-gray-50 p-4 rounded">
+                      <p className="text-sm text-gray-600">Card-like Fallback</p>
+                      <p className="font-semibold text-gray-900">{cardLikeFallbackUsed ? "✓ ใช่" : "✗ ไม่"}</p>
+                    </div>
+
+                    <div className="bg-gray-50 p-4 rounded">
+                      <p className="text-sm text-gray-600">OCR Confidence</p>
+                      <p className="font-semibold text-gray-900">{(preview.confidence * 100).toFixed(0)}%</p>
+                    </div>
+                  </div>
+
+                  {reviewReasons.length > 0 && (
+                    <div className="rounded-lg bg-orange-50 p-4 border border-orange-200">
+                      <p className="text-sm font-semibold text-orange-900 mb-2">ต้องตรวจสอบ:</p>
+                      <ul className="text-sm text-orange-800 space-y-1">
+                        {reviewReasons.map((reason, i) => (
+                          <li key={i}>• {translateReviewReason(reason)}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </>
+              );
+            })()}
           </div>
         )}
 
