@@ -2,6 +2,21 @@
 
 import { useState } from "react";
 
+// Candidate type matching backend structure
+interface FieldCandidate {
+  fieldName: string;
+  value: string | { first: string; last: string } | null;
+  rawText: string;
+  normalizedText: string;
+  source: string;
+  templateVersion: string;
+  roiName: string;
+  confidence: number;
+  score: number;
+  parser: string;
+  warnings: string[];
+}
+
 interface OCRPreview {
   sourceFilename: string;
   ocrText: string;
@@ -14,6 +29,15 @@ interface OCRPreview {
   eligibilityStatus: "eligible" | "over_age" | "unknown";
   eligibilityNote: string | null;
   warnings: string[];
+  // New structured OCR fields
+  extraction_mode?: string;
+  roi_preset?: string | null;
+  card_detected?: boolean;
+  card_warped?: boolean;
+  card_like_fallback_used?: boolean;
+  field_candidates?: Record<string, FieldCandidate[]>;
+  selected_candidates?: Record<string, FieldCandidate>;
+  review_reasons?: string[];
 }
 
 interface OCRPreviewProps {
@@ -60,7 +84,7 @@ export function OCRPreview({
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showOCRText, setShowOCRText] = useState(false);
+  const [activeTab, setActiveTab] = useState<"structured" | "candidates" | "confidence" | "debug" | "raw">("structured");
 
   // Edit state
   const [editedFirstName, setEditedFirstName] = useState<string>("");
@@ -101,6 +125,33 @@ export function OCRPreview({
     } finally {
       setUploading(false);
     }
+  };
+
+  // Translate review reason to Thai
+  const translateReviewReason = (reason: string): string => {
+    const translations: Record<string, string> = {
+      MISSING_FIRST_NAME: "ไม่พบชื่อจริง",
+      MISSING_LAST_NAME: "ไม่พบนามสกุล",
+      MISSING_DATE_OF_BIRTH: "ไม่พบวันเกิด",
+      LOW_OCR_CONFIDENCE: "ความมั่นใจต่ำ",
+      FULL_OCR_FALLBACK_ONLY: "ใช้ OCR แบบเดิมเท่านั้น",
+    };
+    return translations[reason] || reason;
+  };
+
+  // Handle candidate selection
+  const selectCandidate = (candidate: FieldCandidate) => {
+    if (candidate.fieldName === "thai_full_name" && typeof candidate.value === "object" && candidate.value) {
+      setEditedFirstName(candidate.value.first);
+      setEditedLastName(candidate.value.last);
+    } else if (candidate.fieldName === "english_first_name" && typeof candidate.value === "string") {
+      setEditedFirstName(candidate.value);
+    } else if (candidate.fieldName === "english_last_name" && typeof candidate.value === "string") {
+      setEditedLastName(candidate.value);
+    } else if ((candidate.fieldName === "dob_english" || candidate.fieldName === "dob_thai") && typeof candidate.value === "string") {
+      setEditedDOB(candidate.value);
+    }
+    setActiveTab("structured");
   };
 
   const handleSave = async () => {
@@ -165,7 +216,7 @@ export function OCRPreview({
 
   return (
     <div className="space-y-4 rounded-lg bg-white p-6 shadow">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between mb-6">
         <h3 className="text-lg font-semibold">ตรวจสอบผลลัพธ์ OCR</h3>
         <p className="text-sm text-gray-600">{preview.sourceFilename}</p>
       </div>
@@ -187,106 +238,268 @@ export function OCRPreview({
         </div>
       )}
 
-      {/* OCR Data Display */}
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            ชื่อจริง
-          </label>
-          <input
-            type="text"
-            value={editedFirstName}
-            onChange={(e) => setEditedFirstName(e.target.value)}
-            className="w-full rounded border border-gray-300 px-3 py-2"
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            นามสกุล
-          </label>
-          <input
-            type="text"
-            value={editedLastName}
-            onChange={(e) => setEditedLastName(e.target.value)}
-            className="w-full rounded border border-gray-300 px-3 py-2"
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            วันเกิด
-          </label>
-          <input
-            type="date"
-            value={editedDOB}
-            onChange={(e) => setEditedDOB(e.target.value)}
-            className="w-full rounded border border-gray-300 px-3 py-2"
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            ปีเกิด (พ.ศ.)
-          </label>
-          <input
-            type="text"
-            value={preview.birthYearBE || "-"}
-            disabled
-            className="w-full rounded border border-gray-300 bg-gray-50 px-3 py-2"
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            สถานะการลงเข้าร่วม
-          </label>
-          <div className="pt-2">
-            <EligibilityBadge status={preview.eligibilityStatus} />
-          </div>
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            ความแม่นยำ
-          </label>
-          <div className="flex items-center pt-2">
-            <div className="flex-1 bg-gray-200 rounded-full h-2">
-              <div
-                className={`h-2 rounded-full ${
-                  preview.confidence > 0.8
-                    ? "bg-green-500"
-                    : preview.confidence > 0.6
-                      ? "bg-yellow-500"
-                      : "bg-red-500"
-                }`}
-                style={{ width: `${preview.confidence * 100}%` }}
-              />
-            </div>
-            <span className="ml-2 text-sm text-gray-600">
-              {(preview.confidence * 100).toFixed(0)}%
-            </span>
-          </div>
+      {/* Tabs */}
+      <div className="border-b border-gray-200">
+        <div className="flex gap-4">
+          {(["structured", "candidates", "confidence", "debug", "raw"] as const).map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`px-4 py-2 font-medium text-sm border-b-2 transition-colors ${
+                activeTab === tab
+                  ? "border-blue-500 text-blue-600"
+                  : "border-transparent text-gray-600 hover:text-gray-900"
+              }`}
+            >
+              {tab === "structured" && "ผลลัพธ์"}
+              {tab === "candidates" && "ตัวเลือก"}
+              {tab === "confidence" && "สถิติ"}
+              {tab === "debug" && "Debug"}
+              {tab === "raw" && "ข้อความ OCR"}
+            </button>
+          ))}
         </div>
       </div>
 
-      {preview.eligibilityNote && (
-        <div className="rounded-lg bg-blue-50 p-4">
-          <p className="text-sm text-blue-900">{preview.eligibilityNote}</p>
-        </div>
-      )}
+      {/* Tab Content */}
+      <div className="py-4">
+        {/* Structured Tab */}
+        {activeTab === "structured" && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  ชื่อจริง
+                </label>
+                <input
+                  type="text"
+                  value={editedFirstName}
+                  onChange={(e) => setEditedFirstName(e.target.value)}
+                  placeholder="กรอกชื่อจริง"
+                  className="w-full rounded border border-gray-300 px-3 py-2"
+                />
+              </div>
 
-      {/* OCR Text Accordion */}
-      <details className="border border-gray-200 rounded-lg">
-        <summary className="cursor-pointer p-4 font-medium text-gray-700 hover:bg-gray-50">
-          ดูข้อความ OCR แบบเต็ม
-        </summary>
-        <div className="border-t p-4 bg-gray-50">
-          <pre className="whitespace-pre-wrap break-words font-mono text-xs text-gray-700 max-h-48 overflow-y-auto">
-            {preview.ocrText}
-          </pre>
-        </div>
-      </details>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  นามสกุล
+                </label>
+                <input
+                  type="text"
+                  value={editedLastName}
+                  onChange={(e) => setEditedLastName(e.target.value)}
+                  placeholder="กรอกนามสกุล"
+                  className="w-full rounded border border-gray-300 px-3 py-2"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  วันเกิด
+                </label>
+                <input
+                  type="date"
+                  value={editedDOB}
+                  onChange={(e) => setEditedDOB(e.target.value)}
+                  className="w-full rounded border border-gray-300 px-3 py-2"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  ปีเกิด (พ.ศ.)
+                </label>
+                <input
+                  type="text"
+                  value={preview.birthYearBE || "-"}
+                  disabled
+                  className="w-full rounded border border-gray-300 bg-gray-50 px-3 py-2"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  สถานะการลงเข้าร่วม
+                </label>
+                <div className="pt-2">
+                  <EligibilityBadge status={preview.eligibilityStatus} />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  ความแม่นยำ
+                </label>
+                <div className="flex items-center pt-2">
+                  <div className="flex-1 bg-gray-200 rounded-full h-2">
+                    <div
+                      className={`h-2 rounded-full ${
+                        preview.confidence > 0.8
+                          ? "bg-green-500"
+                          : preview.confidence > 0.6
+                            ? "bg-yellow-500"
+                            : "bg-red-500"
+                      }`}
+                      style={{ width: `${preview.confidence * 100}%` }}
+                    />
+                  </div>
+                  <span className="ml-2 text-sm text-gray-600">
+                    {(preview.confidence * 100).toFixed(0)}%
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {preview.eligibilityNote && (
+              <div className="rounded-lg bg-blue-50 p-4">
+                <p className="text-sm text-blue-900">{preview.eligibilityNote}</p>
+              </div>
+            )}
+
+            {preview.field_candidates && Object.keys(preview.field_candidates).length > 0 && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <p className="text-sm text-blue-900 mb-2">
+                  💡 ใช้ tab "ตัวเลือก" เพื่อเลือก candidate อื่นหากผลลัพธ์ไม่ถูกต้อง
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Candidates Tab */}
+        {activeTab === "candidates" && (
+          <div className="space-y-6">
+            {preview.field_candidates ? (
+              Object.entries(preview.field_candidates).map(([fieldName, candidates]) => {
+                if (candidates.length === 0) return null;
+                return (
+                  <div key={fieldName} className="border rounded-lg p-4">
+                    <h4 className="font-semibold text-gray-900 mb-3">{fieldName}</h4>
+                    <div className="space-y-2">
+                      {candidates.map((candidate, idx) => (
+                        <div key={idx} className="bg-gray-50 p-3 rounded border border-gray-200">
+                          <div className="flex justify-between items-start mb-2">
+                            <div className="flex-1">
+                              <p className="font-medium text-gray-900">
+                                {typeof candidate.value === "object" && candidate.value
+                                  ? `${candidate.value.first} ${candidate.value.last}`
+                                  : candidate.value || "(ว่าง)"}
+                              </p>
+                              <p className="text-xs text-gray-600 mt-1">
+                                Raw: {candidate.rawText.substring(0, 50)}...
+                              </p>
+                              <div className="flex gap-4 mt-2 text-xs text-gray-600">
+                                <span>V: {candidate.templateVersion}</span>
+                                <span>Score: {candidate.score.toFixed(1)}</span>
+                                <span>Conf: {(candidate.confidence * 100).toFixed(0)}%</span>
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => selectCandidate(candidate)}
+                              className="ml-2 rounded bg-blue-500 px-3 py-1 text-sm text-white hover:bg-blue-600"
+                            >
+                              ใช้
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })
+            ) : (
+              <p className="text-gray-600">ไม่มี candidates สำหรับการเลือก</p>
+            )}
+          </div>
+        )}
+
+        {/* Confidence Tab */}
+        {activeTab === "confidence" && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="bg-gray-50 p-4 rounded">
+                <p className="text-sm text-gray-600">Extraction Mode</p>
+                <p className="font-semibold text-gray-900">{preview.extraction_mode || "N/A"}</p>
+              </div>
+
+              <div className="bg-gray-50 p-4 rounded">
+                <p className="text-sm text-gray-600">ROI Preset</p>
+                <p className="font-semibold text-gray-900">{preview.roi_preset || "N/A"}</p>
+              </div>
+
+              <div className="bg-gray-50 p-4 rounded">
+                <p className="text-sm text-gray-600">Card Detected</p>
+                <p className="font-semibold text-gray-900">{preview.card_detected ? "✓ ใช่" : "✗ ไม่"}</p>
+              </div>
+
+              <div className="bg-gray-50 p-4 rounded">
+                <p className="text-sm text-gray-600">Card-like Fallback</p>
+                <p className="font-semibold text-gray-900">{preview.card_like_fallback_used ? "✓ ใช่" : "✗ ไม่"}</p>
+              </div>
+            </div>
+
+            {preview.review_reasons && preview.review_reasons.length > 0 && (
+              <div className="rounded-lg bg-orange-50 p-4 border border-orange-200">
+                <p className="text-sm font-semibold text-orange-900 mb-2">ต้องตรวจสอบ:</p>
+                <ul className="text-sm text-orange-800 space-y-1">
+                  {preview.review_reasons.map((reason, i) => (
+                    <li key={i}>• {translateReviewReason(reason)}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Debug Tab */}
+        {activeTab === "debug" && (
+          <div className="space-y-4">
+            <div className="flex gap-2">
+              <button
+                onClick={() => {
+                  const debugText = [
+                    `Extraction Mode: ${preview.extraction_mode}`,
+                    `ROI Preset: ${preview.roi_preset}`,
+                    `Card Detected: ${preview.card_detected}`,
+                    `Card-like Fallback: ${preview.card_like_fallback_used}`,
+                    `Confidence: ${(preview.confidence * 100).toFixed(0)}%`,
+                  ].join("\n");
+                  navigator.clipboard.writeText(debugText);
+                }}
+                className="rounded bg-gray-500 px-4 py-2 text-sm text-white hover:bg-gray-600"
+              >
+                Copy Debug Info
+              </button>
+            </div>
+            <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+              <pre className="whitespace-pre-wrap text-wrap font-mono text-xs text-gray-700 max-h-64 overflow-y-auto">
+                {JSON.stringify(
+                  {
+                    extraction_mode: preview.extraction_mode,
+                    roi_preset: preview.roi_preset,
+                    card_detected: preview.card_detected,
+                    card_like_fallback_used: preview.card_like_fallback_used,
+                    confidence: preview.confidence,
+                    review_reasons: preview.review_reasons,
+                  },
+                  null,
+                  2
+                )}
+              </pre>
+            </div>
+          </div>
+        )}
+
+        {/* Raw Text Tab */}
+        {activeTab === "raw" && (
+          <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+            <p className="text-xs text-gray-600 mb-2">OCR Output (ID numbers redacted):</p>
+            <pre className="whitespace-pre-wrap text-wrap font-mono text-xs text-gray-700 max-h-64 overflow-y-auto">
+              {preview.ocrText}
+            </pre>
+          </div>
+        )}
+      </div>
 
       {/* Action Buttons */}
       <div className="flex gap-3 justify-end pt-4 border-t">
