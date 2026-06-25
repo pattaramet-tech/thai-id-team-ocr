@@ -59,6 +59,57 @@ FORBIDDEN_WORDS_EXTENDED = {
 }
 
 
+def is_valid_candidate_value(field_name: str, value, raw_text: str) -> bool:
+    """Check if candidate value is valid and usable."""
+    # None value is invalid
+    if value is None:
+        return False
+
+    # Tuple (first, last) names
+    if isinstance(value, tuple) and len(value) == 2:
+        first, last = value
+        # Both parts can't be None/empty/null strings
+        if first is None and last is None:
+            return False
+        # Check for invalid string representations
+        invalid_strings = ("null", "none", "", "(ว่าง)", "nan")
+        if first and str(first).lower() in invalid_strings:
+            return False
+        if last and str(last).lower() in invalid_strings:
+            return False
+        # At least one part should be valid
+        return (first and str(first).strip()) or (last and str(last).strip())
+
+    # String values
+    if isinstance(value, str):
+        value_clean = value.strip()
+        if not value_clean:
+            return False
+        # Check for invalid representations
+        invalid_strings = ("null", "none", "nan", "(ว่าง)")
+        if value_clean.lower() in invalid_strings:
+            return False
+        # Names should not have digits
+        if "name" in field_name.lower() and any(c.isdigit() for c in value_clean):
+            return False
+        # Check for forbidden words
+        if any(word in value_clean.lower() for word in ["date", "birth", "identification", "card", "address"]):
+            return False
+        return True
+
+    # Date values
+    if isinstance(value, date):
+        return True
+    if isinstance(value, str) and field_name and "dob" in field_name.lower():
+        try:
+            date.fromisoformat(value)
+            return True
+        except (ValueError, AttributeError):
+            return False
+
+    return False
+
+
 def serialize_field_candidate(candidate: FieldCandidate) -> Dict:
     """Serialize FieldCandidate dataclass to plain dict for JSON."""
     value = candidate.value
@@ -92,6 +143,90 @@ def serialize_field_candidates(field_candidates: Dict[str, List[FieldCandidate]]
         field_name: [serialize_field_candidate(c) for c in candidates]
         for field_name, candidates in field_candidates.items()
     }
+
+
+def extract_labeled_fields_from_full_ocr(ocr_text: str) -> Dict[str, FieldCandidate]:
+    """Extract fields from full OCR text using labeled patterns.
+
+    Looks for clear labels like 'Name', 'Last name', 'Date of Birth', etc.
+    Returns candidates with source='labeled_full_ocr'.
+    """
+    candidates = {}
+    text_lower = ocr_text.lower()
+    lines = ocr_text.split('\n')
+
+    # Extract English first name from 'Name' label
+    for line in lines:
+        if 'name' in line.lower() and 'last' not in line.lower():
+            # Find text after "Name" label
+            match = re.search(r'name[:\s]+([a-zA-Z\s\.]+)', line, re.IGNORECASE)
+            if match:
+                name_text = match.group(1).strip()
+                # Remove titles
+                for title in ["Mr.", "Mrs.", "Miss", "Ms.", "Dr.", "Prof."]:
+                    if name_text.lower().startswith(title.lower()):
+                        name_text = name_text[len(title):].strip()
+                if name_text and len(name_text) > 1:
+                    candidates["english_first_name"] = FieldCandidate(
+                        fieldName="english_first_name",
+                        value=name_text,
+                        rawText=redact_thai_id_numbers(name_text),
+                        normalizedText=name_text,
+                        source="labeled_full_ocr",
+                        templateVersion="N/A",
+                        roiName="full_ocr_label",
+                        confidence=0.5,
+                        parser="labeled_extraction",
+                        warnings=["labeled_fallback"]
+                    )
+
+    # Extract English last name from 'Last name' label
+    for line in lines:
+        if 'last name' in line.lower():
+            match = re.search(r'last name[:\s]+([a-zA-Z\s]+)', line, re.IGNORECASE)
+            if match:
+                last_text = match.group(1).strip()
+                if last_text and len(last_text) > 1:
+                    candidates["english_last_name"] = FieldCandidate(
+                        fieldName="english_last_name",
+                        value=last_text,
+                        rawText=redact_thai_id_numbers(last_text),
+                        normalizedText=last_text,
+                        source="labeled_full_ocr",
+                        templateVersion="N/A",
+                        roiName="full_ocr_label",
+                        confidence=0.5,
+                        parser="labeled_extraction",
+                        warnings=["labeled_fallback"]
+                    )
+
+    # Extract date of birth from 'Date of Birth' or 'เกิดวันที่' label
+    for line in lines:
+        if 'date of birth' in line.lower():
+            # Try to extract date from text after label
+            remaining = re.sub(r'date of birth[:\s]*', '', line, flags=re.IGNORECASE).strip()
+            dob = OCRService.extract_date_of_birth(remaining)
+            if dob:
+                candidates["dob_english"] = FieldCandidate(
+                    fieldName="dob_english",
+                    value=dob,
+                    rawText=redact_thai_id_numbers(remaining),
+                    normalizedText=remaining,
+                    source="labeled_full_ocr",
+                    templateVersion="N/A",
+                    roiName="full_ocr_label",
+                    confidence=0.5,
+                    parser="labeled_extraction",
+                    warnings=["labeled_fallback"]
+                )
+
+    return candidates
+
+
+def redact_thai_id_numbers(text: str) -> str:
+    """Redact Thai ID numbers from text."""
+    # Reuse the redaction logic from OCRService
+    return re.sub(r'\d{13}', '[REDACTED_ID]', str(text))
 
 
 def get_selected_candidates_with_preset(field_candidates: Dict[str, List[FieldCandidate]],
@@ -1120,7 +1255,16 @@ class OCRService:
         +0-30 OCR confidence
         +10 not forbidden/noise
         +10 good length
+
+        Invalid candidates get score 0.
         """
+        # Check validity first - invalid candidates get 0 score
+        if not is_valid_candidate_value(candidate.fieldName, candidate.value, candidate.rawText):
+            candidate.score = 0.0
+            if "INVALID" not in candidate.warnings:
+                candidate.warnings.append("INVALID_EMPTY_OR_NOISE_VALUE")
+            return 0.0
+
         score = 0.0
 
         # Source bonus
