@@ -619,6 +619,67 @@ class TestCardLikeFallback:
         assert "\nร\n" not in normalized
 
 
+class TestStructuredConfidenceScoring:
+    """Test structured OCR confidence scoring."""
+
+    def test_ocr_confidence_calculation(self):
+        """Calculate average OCR confidence from ROI results."""
+        roi_results = {
+            "thai_name_line": {"text": "test", "confidence": 0.8},
+            "english_first_name": {"text": "test", "confidence": 0.9},
+            "english_last_name": {"text": "test", "confidence": 0.7},
+        }
+        conf = OCRService.calculate_ocr_confidence(roi_results)
+        assert 0.7 <= conf <= 0.9  # Should be around 0.8
+
+    def test_structured_confidence_with_all_fields(self):
+        """Structured confidence high when all fields present."""
+        from datetime import date
+        conf = OCRService.calculate_structured_confidence(
+            first_name="John",
+            last_name="Doe",
+            dob=date(2009, 9, 23),
+            card_detected=True,
+            card_warped=True,
+            card_like=False
+        )
+        # firstName(25) + lastName(25) + DOB(25) + DOB_format(10) + card(15) = 100
+        assert conf == 100.0
+
+    def test_structured_confidence_missing_fields(self):
+        """Structured confidence lower when fields missing."""
+        conf = OCRService.calculate_structured_confidence(
+            first_name=None,
+            last_name=None,
+            dob=None,
+            card_detected=False,
+            card_warped=False,
+            card_like=False
+        )
+        assert conf == 0.0
+
+    def test_final_confidence_calculation(self):
+        """Final confidence weighted from OCR and structured."""
+        final = OCRService.calculate_final_confidence(ocr_conf=0.8, structured_conf=100.0)
+        # (0.8 * 0.4) + (100 * 0.6) = 0.32 + 60 = 60.32
+        assert 60.0 <= final <= 61.0
+
+    def test_candidate_score_from_roi(self):
+        """Candidate from ROI gets high score."""
+        from app.services.id_ocr_structured import FieldCandidate, FieldSource
+        candidate = FieldCandidate(
+            fieldName="firstName",
+            value="John",
+            source=FieldSource.ENGLISH_FIRST_ROI,
+            confidence=0.9,
+            evidenceText="John",
+            parser="parse_english_name_from_roi"
+        )
+        score = OCRService.calculate_candidate_score(candidate)
+        # ROI(40) + confidence(27) + length(10) = 77
+        assert score > 60
+
+
 class TestThaiIDTemplateExtraction:
     """Test Thai ID template extraction workflow and confidence calculation."""
 

@@ -8,6 +8,9 @@ import pytesseract
 from pytesseract import Output
 from typing import Optional, Tuple, Dict, List
 from pdf2image import convert_from_bytes
+from app.services.id_ocr_structured import (
+    FieldCandidate, IDOCRStructuredResult, FieldSource, ReviewReasonCode
+)
 
 logger = logging.getLogger(__name__)
 
@@ -850,6 +853,101 @@ class OCRService:
                 return result
 
         return None
+
+    @staticmethod
+    def calculate_candidate_score(candidate: FieldCandidate) -> float:
+        """Calculate score for a field candidate.
+
+        Scoring:
+        - ROI source: +40
+        - Has clear label: +20
+        - High confidence (0-30): based on confidence value
+        - Valid format/parseable: +30
+        - Not forbidden word: +10
+        - Good length: +10
+
+        Returns score 0-100+
+        """
+        score = 0.0
+
+        # Source bonus
+        if candidate.source in [FieldSource.THAI_NAME_ROI, FieldSource.ENGLISH_FIRST_ROI,
+                                FieldSource.ENGLISH_LAST_ROI, FieldSource.DOB_ENGLISH_ROI,
+                                FieldSource.DOB_THAI_ROI]:
+            score += 40
+        elif candidate.source == FieldSource.LABELED_FULL_OCR:
+            score += 20
+        # FULL_OCR_FALLBACK gets 0
+
+        # Confidence bonus (0-30 based on confidence)
+        score += candidate.confidence * 30
+
+        # Format validity bonus
+        if candidate.fieldName == "dateOfBirth" and isinstance(candidate.value, date):
+            score += 30
+        elif candidate.fieldName in ["firstName", "lastName"] and isinstance(candidate.value, str):
+            if len(candidate.value) > 2:
+                score += 20
+            if not any(word in candidate.value.lower() for word in ["date", "birth", "identification", "card"]):
+                score += 10
+
+        # Length bonus
+        if isinstance(candidate.value, str) and 3 <= len(candidate.value) <= 30:
+            score += 10
+
+        candidate.score = min(score, 150.0)  # Cap at 150
+        return candidate.score
+
+    @staticmethod
+    def calculate_ocr_confidence(roi_results: Dict) -> float:
+        """Calculate average OCR confidence from ROI results."""
+        if not roi_results:
+            return 0.0
+
+        confidences = []
+        for _, roi_data in roi_results.items():
+            if isinstance(roi_data, dict):
+                conf = roi_data.get("confidence", 0)
+                if conf > 0:
+                    confidences.append(conf)
+
+        return sum(confidences) / len(confidences) if confidences else 0.0
+
+    @staticmethod
+    def calculate_structured_confidence(first_name: Optional[str], last_name: Optional[str],
+                                       dob: Optional[date], card_detected: bool,
+                                       card_warped: bool, card_like: bool) -> float:
+        """Calculate structured confidence score.
+
+        - firstName present: +25
+        - lastName present: +25
+        - dateOfBirth present: +25
+        - Card detected or warped: +15
+        - DOB format valid: +10
+        Max: 100
+        """
+        score = 0.0
+
+        if first_name:
+            score += 25
+        if last_name:
+            score += 25
+        if dob:
+            score += 25
+            score += 10  # DOB format bonus
+
+        if card_detected or card_warped or card_like:
+            score += 15
+
+        return min(score, 100.0)
+
+    @staticmethod
+    def calculate_final_confidence(ocr_conf: float, structured_conf: float) -> float:
+        """Calculate final confidence from OCR and structured confidence.
+
+        finalConfidence = (ocrConfidence * 0.4) + (structuredConfidence * 0.6)
+        """
+        return round(ocr_conf * 0.4 + structured_conf * 0.6, 2)
 
     @staticmethod
     def extract_from_thai_id_template(image_bytes: bytes) -> Dict:
