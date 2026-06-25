@@ -122,6 +122,10 @@ def serialize_field_candidate(candidate: FieldCandidate) -> Dict:
         first, last = value
         value = {"first": first, "last": last}
 
+    # Check validity
+    is_valid = is_valid_candidate_value(candidate.fieldName, candidate.value, candidate.rawText)
+    show_in_ui = is_valid and candidate.score > 0
+
     return {
         "fieldName": candidate.fieldName,
         "value": value,
@@ -133,7 +137,9 @@ def serialize_field_candidate(candidate: FieldCandidate) -> Dict:
         "confidence": float(candidate.confidence),
         "score": float(candidate.score),
         "parser": candidate.parser,
-        "warnings": candidate.warnings
+        "warnings": candidate.warnings,
+        "isValid": is_valid,
+        "showInUI": show_in_ui
     }
 
 
@@ -1304,9 +1310,10 @@ class OCRService:
         """Select the best candidate for each field.
 
         Rules:
-        - firstName: prefer Thai candidate from thai_full_name if score > 50, else English
-        - lastName: prefer Thai candidate from thai_full_name if score > 50, else English
-        - dateOfBirth: prefer dob_english if parsed, else dob_thai
+        - Only select candidates with score > 0 and valid values
+        - firstName: prefer Thai candidate from thai_full_name if score >= 50, else English >= 40, else labeled
+        - lastName: prefer Thai candidate from thai_full_name if score >= 50, else English >= 40, else labeled
+        - dateOfBirth: prefer dob_english if valid, else dob_thai, else labeled
 
         Returns: (firstName, lastName, dateOfBirth)
         """
@@ -1319,44 +1326,50 @@ class OCRService:
         eng_first_candidates = field_candidates.get("english_first_name", [])
         eng_last_candidates = field_candidates.get("english_last_name", [])
 
-        # Try Thai names first
+        # Try Thai names first (only valid score >= 50)
         for candidate in thai_candidates:
-            if candidate.value and isinstance(candidate.value, tuple):
-                thai_first, thai_last = candidate.value
-                if candidate.score >= 50 and thai_first:
-                    first_name = thai_first
-                    last_name = thai_last
-                    break
+            if candidate.score > 0 and is_valid_candidate_value("thai_full_name", candidate.value, candidate.rawText):
+                if candidate.value and isinstance(candidate.value, tuple):
+                    thai_first, thai_last = candidate.value
+                    if candidate.score >= 50 and thai_first:
+                        first_name = thai_first
+                        last_name = thai_last
+                        break
 
-        # Fallback to English
+        # Fallback to English first name (only valid score >= 40)
         if not first_name and eng_first_candidates:
             for candidate in eng_first_candidates:
-                if candidate.value:
-                    first_name = candidate.value
-                    break
+                if candidate.score > 0 and is_valid_candidate_value("english_first_name", candidate.value, candidate.rawText):
+                    if candidate.score >= 40 and candidate.value:
+                        first_name = candidate.value
+                        break
 
+        # Fallback to English last name (only valid score >= 40)
         if not last_name and eng_last_candidates:
             for candidate in eng_last_candidates:
-                if candidate.value:
-                    last_name = candidate.value
-                    break
+                if candidate.score > 0 and is_valid_candidate_value("english_last_name", candidate.value, candidate.rawText):
+                    if candidate.score >= 40 and candidate.value:
+                        last_name = candidate.value
+                        break
 
         # Extract date of birth
         dob_english_candidates = field_candidates.get("dob_english", [])
         dob_thai_candidates = field_candidates.get("dob_thai", [])
 
-        # Prefer English DOB
+        # Prefer English DOB (only valid)
         for candidate in dob_english_candidates:
-            if isinstance(candidate.value, date):
-                dob = candidate.value
-                break
-
-        # Fallback to Thai DOB
-        if not dob:
-            for candidate in dob_thai_candidates:
+            if candidate.score > 0 and is_valid_candidate_value("dob_english", candidate.value, candidate.rawText):
                 if isinstance(candidate.value, date):
                     dob = candidate.value
                     break
+
+        # Fallback to Thai DOB (only valid)
+        if not dob:
+            for candidate in dob_thai_candidates:
+                if candidate.score > 0 and is_valid_candidate_value("dob_thai", candidate.value, candidate.rawText):
+                    if isinstance(candidate.value, date):
+                        dob = candidate.value
+                        break
 
         return first_name, last_name, dob
 
@@ -1416,6 +1429,22 @@ class OCRService:
                 # Use template manager to extract field candidates from multiple versions
                 field_candidates = OCRService.extract_field_candidates_from_templates(warped_card)
 
+                # Merge labeled full OCR fallback candidates
+                if full_ocr_text:
+                    labeled_candidates = extract_labeled_fields_from_full_ocr(full_ocr_text)
+                    for field_name, candidate in labeled_candidates.items():
+                        # Score the labeled candidate
+                        field_config = thai_id_template_manager.get_field_config(field_name)
+                        if field_config:
+                            OCRService.score_field_candidate(candidate, field_config)
+                        # Add to field_candidates
+                        if candidate.score > 0:
+                            field_candidates.setdefault(field_name, []).append(candidate)
+
+                # Re-sort candidates by score
+                for field_name in field_candidates:
+                    field_candidates[field_name].sort(key=lambda c: c.score, reverse=True)
+
                 # Select best candidates for each field
                 first_name, last_name, dob = OCRService.select_best_fields(field_candidates)
 
@@ -1436,8 +1465,40 @@ class OCRService:
 
                 avg_confidence = sum(all_confidences) / len(all_confidences) if all_confidences else 0.0
 
+                # Check if labeled fallback was used
+                labeled_fallback_used = False
+                for field_name, candidates in field_candidates.items():
+                    for c in candidates:
+                        if c.source == "labeled_full_ocr" and c.score > 0:
+                            labeled_fallback_used = True
+                            break
+
+                # Check if any valid ROI candidates were rejected due to invalidity
+                invalid_candidates_rejected = False
+                for field_name, candidates in field_candidates.items():
+                    for c in candidates:
+                        if c.score == 0 and "INVALID" in c.warnings:
+                            invalid_candidates_rejected = True
+                            break
+
                 # Build review reasons for missing/weak fields
                 review_reasons = []
+
+                if labeled_fallback_used:
+                    review_reasons.append("LABELED_FALLBACK_USED")
+
+                if invalid_candidates_rejected:
+                    review_reasons.append("INVALID_CANDIDATE_REJECTED")
+
+                # Check for no valid candidates in critical fields
+                has_valid_first_name = any(c.score > 0 and is_valid_candidate_value("english_first_name", c.value, c.rawText)
+                                          for c in field_candidates.get("english_first_name", []))
+                has_valid_thai_name = any(c.score > 0 and is_valid_candidate_value("thai_full_name", c.value, c.rawText)
+                                         for c in field_candidates.get("thai_full_name", []))
+
+                if not has_valid_first_name and not has_valid_thai_name:
+                    review_reasons.append("NO_VALID_CANDIDATES")
+
                 if not first_name:
                     review_reasons.append("MISSING_FIRST_NAME")
                     warnings.append("ไม่พบชื่อจริง กรุณากรอกเอง")
