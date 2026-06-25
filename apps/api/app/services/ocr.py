@@ -28,6 +28,20 @@ THAI_ID_ASPECT_RATIO_MAX = 1.70
 THAI_ID_STANDARD_WIDTH = 1000
 THAI_ID_STANDARD_HEIGHT = 630
 
+# Thai ID card aspect ratio for card-like images (more lenient)
+CARD_LIKE_ASPECT_RATIO_MIN = 1.35
+CARD_LIKE_ASPECT_RATIO_MAX = 1.85
+
+# Alternative ROI presets for card-like normalized images
+THAI_ID_CARD_ROIS_V2 = {
+    # Larger ROI for card-like images (more padding)
+    "thai_name_line": (190, 180, 600, 95),
+    "english_first_name": (310, 250, 430, 70),
+    "english_last_name": (310, 310, 430, 70),
+    "dob_thai": (300, 365, 430, 65),
+    "dob_english": (330, 420, 440, 65),
+}
+
 # Noise words to exclude from name extraction
 FORBIDDEN_WORDS_EXTENDED = {
     "ประชาชน", "ประจำตัว", "เลขประจำตัว", "บัตรประชาชน", "ไทย",
@@ -180,6 +194,152 @@ class OCRService:
         except Exception as e:
             logger.debug(f"Card detection failed: {e}")
             return None
+
+    @staticmethod
+    def is_card_like_image(image_bytes: bytes, ocr_text: str = "") -> bool:
+        """Check if image appears to be a Thai ID card even without contour detection.
+
+        Returns True if:
+        - Aspect ratio is card-like (1.35-1.85)
+        - OR OCR text contains ID card keywords
+        - OR OCR text contains DOB pattern
+        """
+        try:
+            nparr = np.frombuffer(image_bytes, np.uint8)
+            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            if img is None:
+                return False
+
+            height, width = img.shape[:2]
+            aspect_ratio = width / (height + 1e-6)
+
+            # Check aspect ratio
+            if CARD_LIKE_ASPECT_RATIO_MIN <= aspect_ratio <= CARD_LIKE_ASPECT_RATIO_MAX:
+                return True
+
+            # Check for ID card keywords in OCR text
+            keywords = [
+                "Thai National ID Card", "Identification Number",
+                "Date of Birth", "บัตรประจำตัวประชาชน",
+                "เลขประจำตัวประชาชน", "ชื่อตัวและชื่อสกุล",
+                "ชื่อ", "นามสกุล", "Name", "Last name"
+            ]
+            text_lower = ocr_text.lower()
+            if any(kw.lower() in text_lower for kw in keywords):
+                return True
+
+            # Check for DOB patterns
+            if re.search(r'\d+\s+(Sep|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Oct|Nov|Dec)\.?\s+\d{4}', ocr_text):
+                return True
+            if re.search(r'\d+\s+(ม\.ค|ก\.พ|มี\.ค|เม\.ย|พ\.ค|มิ\.ย|กค|ส\.ค|ก\.ย|ต\.ค|พ\.ย|ธ\.ค)', ocr_text):
+                return True
+
+            return False
+
+        except Exception as e:
+            logger.debug(f"Card-like check failed: {e}")
+            return False
+
+    @staticmethod
+    def crop_card_like_content(image_bytes: bytes) -> Optional[np.ndarray]:
+        """Crop content area from card-like image without perfect contour.
+
+        Finds bounding box of non-white content and crops with padding.
+        Returns normalized image (1000x630) or None.
+        """
+        try:
+            nparr = np.frombuffer(image_bytes, np.uint8)
+            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            if img is None:
+                return None
+
+            height, width = img.shape[:2]
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+            # Find pixels that are not white (content area)
+            _, thresh = cv2.threshold(gray, 240, 255, cv2.THRESH_BINARY_INV)
+
+            # Find contours of content
+            contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+            if not contours:
+                return None
+
+            # Get bounding box of all content
+            x_min, y_min = width, height
+            x_max, y_max = 0, 0
+
+            for contour in contours:
+                x, y, w, h = cv2.boundingRect(contour)
+                x_min = min(x_min, x)
+                y_min = min(y_min, y)
+                x_max = max(x_max, x + w)
+                y_max = max(y_max, y + h)
+
+            if x_min >= x_max or y_min >= y_max:
+                return None
+
+            # Add padding (3-5%)
+            padding_x = int((x_max - x_min) * 0.04)
+            padding_y = int((y_max - y_min) * 0.04)
+
+            x_min = max(0, x_min - padding_x)
+            y_min = max(0, y_min - padding_y)
+            x_max = min(width, x_max + padding_x)
+            y_max = min(height, y_max + padding_y)
+
+            # Crop content
+            cropped = img[y_min:y_max, x_min:x_max]
+
+            # Resize/pad to standard size
+            crop_height, crop_width = cropped.shape[:2]
+            crop_aspect = crop_width / (crop_height + 1e-6)
+            target_aspect = THAI_ID_STANDARD_WIDTH / THAI_ID_STANDARD_HEIGHT
+
+            if crop_aspect > target_aspect:
+                # Crop is too wide, resize by height
+                new_height = THAI_ID_STANDARD_HEIGHT
+                new_width = int(new_height * crop_aspect)
+            else:
+                # Crop is too tall, resize by width
+                new_width = THAI_ID_STANDARD_WIDTH
+                new_height = int(new_width / crop_aspect)
+
+            resized = cv2.resize(cropped, (new_width, new_height))
+
+            # Pad to standard size
+            if new_width < THAI_ID_STANDARD_WIDTH or new_height < THAI_ID_STANDARD_HEIGHT:
+                canvas = np.ones((THAI_ID_STANDARD_HEIGHT, THAI_ID_STANDARD_WIDTH, 3), dtype=np.uint8) * 255
+                y_offset = (THAI_ID_STANDARD_HEIGHT - new_height) // 2
+                x_offset = (THAI_ID_STANDARD_WIDTH - new_width) // 2
+                canvas[y_offset:y_offset+new_height, x_offset:x_offset+new_width] = resized
+                return canvas
+
+            return resized[:THAI_ID_STANDARD_HEIGHT, :THAI_ID_STANDARD_WIDTH]
+
+        except Exception as e:
+            logger.debug(f"Card-like content crop failed: {e}")
+            return None
+
+    @staticmethod
+    def normalize_stacked_thai_ocr_text(text: str) -> str:
+        """Normalize stacked Thai OCR output where each character is on separate line.
+
+        Example:
+        Input:  เ\\nก\\nี\\นย\\nร\\nต\\nิ\\nศ\\นัก → Output: เกีดรติศัก
+        """
+        # Remove newlines between Thai characters
+        lines = text.split('\n')
+        thai_chars = []
+
+        for line in lines:
+            stripped = line.strip()
+            # Keep Thai characters and common symbols
+            thai_part = ''.join(c for c in stripped if ('฀' <= c <= '๿') or c in ' .-')
+            if thai_part:
+                thai_chars.append(thai_part)
+
+        return ' '.join(thai_chars)
 
     @staticmethod
     def extract_from_roi(image: np.ndarray, roi_name: str, roi_coords: Tuple[int, int, int, int],
@@ -713,40 +873,64 @@ class OCRService:
         card_warped = False
 
         try:
+            # Get full OCR text for fallback checks
+            full_ocr_text, _, _ = OCRService.extract_text_with_confidence(image_bytes)
+
             # Try to detect and warp card
             warped_card = OCRService.detect_id_card_rectangle(image_bytes)
+            extraction_mode = "thai_id_template_warped"
+            card_like_fallback_used = False
+
             if warped_card is not None:
                 card_detected = True
                 card_warped = True
             else:
-                warnings.append("ไม่พบกรอบบัตรประชาชน ใช้ OCR แบบเดิมแทน")
-                card_detected = False
+                # Try card-like fallback if image looks like a Thai ID
+                if OCRService.is_card_like_image(image_bytes, full_ocr_text):
+                    warped_card = OCRService.crop_card_like_content(image_bytes)
+                    if warped_card is not None:
+                        card_detected = False
+                        card_warped = False
+                        card_like_fallback_used = True
+                        extraction_mode = "thai_id_template_card_like"
+                        warnings.append("ไม่พบกรอบบัตรชัดเจน แต่ใช้โครงบัตรจากภาพแทน กรุณาตรวจสอบข้อมูล")
+                    else:
+                        warnings.append("ไม่พบกรอบบัตรประชาชน กรุณากรอกชื่อเอง")
+                        card_detected = False
+                else:
+                    warnings.append("ไม่พบกรอบบัตรประชาชน กรุณากรอกชื่อเอง")
+                    card_detected = False
 
-            # Extract from ROIs if card was detected and warped
-            if card_warped:
+            # Extract from ROIs if card was detected, warped, or card-like fallback
+            if warped_card is not None:
+                # Choose ROI preset based on extraction mode
+                roi_preset = THAI_ID_CARD_ROIS if not card_like_fallback_used else THAI_ID_CARD_ROIS_V2
+
                 # Extract Thai name
                 thai_name_text, thai_name_conf = OCRService.extract_from_roi(
-                    warped_card, "thai_name_line", THAI_ID_CARD_ROIS["thai_name_line"], lang="tha+eng", psm=6
+                    warped_card, "thai_name_line", roi_preset["thai_name_line"], lang="tha+eng", psm=6
                 )
+                # Normalize stacked Thai characters if needed
+                thai_name_text = OCRService.normalize_stacked_thai_ocr_text(thai_name_text)
                 thai_first, thai_last = OCRService.parse_thai_full_name_from_roi(thai_name_text)
 
                 # Extract English names
                 eng_first_text, eng_first_conf = OCRService.extract_from_roi(
-                    warped_card, "english_first_name", THAI_ID_CARD_ROIS["english_first_name"], lang="eng", psm=7
+                    warped_card, "english_first_name", roi_preset["english_first_name"], lang="eng", psm=7
                 )
                 eng_first = OCRService.parse_english_name_from_roi(eng_first_text)
 
                 eng_last_text, eng_last_conf = OCRService.extract_from_roi(
-                    warped_card, "english_last_name", THAI_ID_CARD_ROIS["english_last_name"], lang="eng", psm=7
+                    warped_card, "english_last_name", roi_preset["english_last_name"], lang="eng", psm=7
                 )
                 eng_last = OCRService.parse_english_name_from_roi(eng_last_text)
 
                 # Extract DOB
                 dob_thai_text, dob_thai_conf = OCRService.extract_from_roi(
-                    warped_card, "dob_thai", THAI_ID_CARD_ROIS["dob_thai"], lang="tha+eng", psm=7
+                    warped_card, "dob_thai", roi_preset["dob_thai"], lang="tha+eng", psm=7
                 )
                 dob_eng_text, dob_eng_conf = OCRService.extract_from_roi(
-                    warped_card, "dob_english", THAI_ID_CARD_ROIS["dob_english"], lang="eng", psm=7
+                    warped_card, "dob_english", roi_preset["dob_english"], lang="eng", psm=7
                 )
                 dob = OCRService.extract_dob_from_rois(dob_eng_text, dob_thai_text)
 
@@ -759,7 +943,7 @@ class OCRService:
                     "dob_english": {"text": OCRService.redact_thai_id_numbers(dob_eng_text), "confidence": dob_eng_conf},
                 }
 
-                # Determine final names
+                # Determine final names (prioritize Thai, fallback to English)
                 first_name = thai_first or eng_first
                 last_name = thai_last or eng_last
 
@@ -775,9 +959,11 @@ class OCRService:
 
                 return {
                     "success": True,
-                    "card_detected": True,
+                    "card_detected": card_detected,
                     "card_warped": True,
-                    "extraction_mode": "thai_id_template",
+                    "extraction_mode": extraction_mode,
+                    "card_like_fallback_used": card_like_fallback_used,
+                    "roi_preset": "v2" if card_like_fallback_used else "v1",
                     "first_name": first_name,
                     "last_name": last_name,
                     "date_of_birth": dob,
@@ -795,6 +981,8 @@ class OCRService:
             "card_detected": card_detected,
             "card_warped": card_warped,
             "extraction_mode": "full_ocr_fallback",
+            "card_like_fallback_used": card_like_fallback_used,
+            "roi_preset": None,
             "first_name": None,
             "last_name": None,
             "date_of_birth": None,

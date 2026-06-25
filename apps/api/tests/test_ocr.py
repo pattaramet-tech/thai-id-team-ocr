@@ -570,6 +570,55 @@ class TestThaiNameRoiParsing:
         assert last == "ใจ"
 
 
+class TestCardLikeFallback:
+    """Test card-like image detection and fallback."""
+
+    def test_is_card_like_with_id_card_keywords(self):
+        """Detect card-like image using ID card keywords."""
+        import cv2
+        import numpy as np
+
+        img = np.ones((630, 1000, 3), dtype=np.uint8) * 255
+        _, buffer = cv2.imencode('.jpg', img)
+        image_bytes = buffer.tobytes()
+
+        # With ID card keywords
+        assert OCRService.is_card_like_image(image_bytes, "Thai National ID Card")
+
+    def test_is_card_like_with_dob_keywords(self):
+        """Detect card-like image using DOB keywords."""
+        import cv2
+        import numpy as np
+
+        img = np.ones((630, 1000, 3), dtype=np.uint8) * 255
+        _, buffer = cv2.imencode('.jpg', img)
+        image_bytes = buffer.tobytes()
+
+        # With DOB keywords
+        assert OCRService.is_card_like_image(image_bytes, "Date of Birth: 23 Sep. 2009")
+
+    def test_is_card_like_with_aspect_ratio(self):
+        """Detect card-like image using aspect ratio alone."""
+        import cv2
+        import numpy as np
+
+        # Image with card-like aspect ratio (1600x1000 = 1.6)
+        img = np.ones((1000, 1600, 3), dtype=np.uint8) * 255
+        _, buffer = cv2.imencode('.jpg', img)
+        image_bytes = buffer.tobytes()
+
+        assert OCRService.is_card_like_image(image_bytes)
+
+    def test_normalize_stacked_thai_ocr(self):
+        """Normalize stacked Thai OCR output."""
+        stacked_text = "เ\nก\nี\nย\nร\nต\nิ\nศ\นัก"
+        normalized = OCRService.normalize_stacked_thai_ocr_text(stacked_text)
+        # Should combine Thai characters
+        assert len(normalized) > 0
+        # Should not have individual newlines between chars
+        assert "\nร\n" not in normalized
+
+
 class TestThaiIDTemplateExtraction:
     """Test Thai ID template extraction workflow and confidence calculation."""
 

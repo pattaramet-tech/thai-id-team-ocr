@@ -8,9 +8,11 @@ class OCRDebugInfo(BaseModel):
     preprocessingMethod: str  # Which preprocessing method was best
     psmMode: int  # Tesseract PSM mode used
     confidence: float
-    extractionMode: Optional[str] = None  # "thai_id_template" or "full_ocr_fallback"
-    cardDetected: Optional[bool] = None  # Whether Thai ID card was detected
+    extractionMode: Optional[str] = None  # "thai_id_template_warped", "thai_id_template_card_like", or "full_ocr_fallback"
+    cardDetected: Optional[bool] = None  # Whether Thai ID card was detected with contours
     cardWarped: Optional[bool] = None  # Whether card was successfully warped
+    cardLikeFallbackUsed: Optional[bool] = None  # Whether card-like fallback was used
+    roiPresetUsed: Optional[str] = None  # "v1" or "v2" ROI preset
     roiResults: Optional[Dict[str, Any]] = None  # Individual ROI extraction results
 
 class OCRPreviewResponse(BaseModel):

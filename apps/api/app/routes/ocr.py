@@ -133,6 +133,8 @@ def process_ocr_file(
                 extractionMode=extraction_mode,
                 cardDetected=template_result.get("card_detected"),
                 cardWarped=template_result.get("card_warped"),
+                cardLikeFallbackUsed=template_result.get("card_like_fallback_used"),
+                roiPresetUsed=template_result.get("roi_preset"),
                 roiResults=roi_results if roi_results else None
             )
         ), None
