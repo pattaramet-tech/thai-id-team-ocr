@@ -11,6 +11,31 @@ from pdf2image import convert_from_bytes
 
 logger = logging.getLogger(__name__)
 
+# Thai ID Card template ROI (x, y, width, height) on standard 1000x630 warped card
+THAI_ID_CARD_ROIS = {
+    "thai_name_line": (250, 205, 520, 75),      # "ชื่อตัวและชื่อสกุล"
+    "english_first_name": (360, 265, 360, 55),  # "Name / Mr. ..."
+    "english_last_name": (360, 320, 360, 55),   # "Last name ..."
+    "dob_thai": (350, 370, 360, 55),            # "เกิดวันที่ ... พ.ศ."
+    "dob_english": (385, 420, 360, 55),         # "Date of Birth ..."
+}
+
+# Thai ID card aspect ratio (width/height) - typically 1.55-1.65
+THAI_ID_ASPECT_RATIO_MIN = 1.50
+THAI_ID_ASPECT_RATIO_MAX = 1.70
+
+# Standard warped card size
+THAI_ID_STANDARD_WIDTH = 1000
+THAI_ID_STANDARD_HEIGHT = 630
+
+# Noise words to exclude from name extraction
+FORBIDDEN_WORDS_EXTENDED = {
+    "ประชาชน", "ประจำตัว", "เลขประจำตัว", "บัตรประชาชน", "ไทย",
+    "Thai", "National", "ID", "Card", "Identification", "Number",
+    "Date", "Birth", "Issue", "Expiry", "ศาสนา", "ที่อยู่",
+    "Address", "Sex", "เพศ", "สัญชาติ", "Nationality"
+}
+
 class OCRService:
     @staticmethod
     def pdf_to_image_bytes(pdf_bytes: bytes) -> bytes:
@@ -70,6 +95,131 @@ class OCRService:
             _, thresh = cv2.threshold(denoised, 150, 255, cv2.THRESH_BINARY)
             kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
             return cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+
+    @staticmethod
+    def detect_id_card_rectangle(image_bytes: bytes) -> Optional[np.ndarray]:
+        """Detect Thai ID card rectangle and return perspective-warped image.
+
+        Returns warped card image (1000x630) or None if detection fails.
+        """
+        try:
+            nparr = np.frombuffer(image_bytes, np.uint8)
+            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            if img is None:
+                return None
+
+            height, width = img.shape[:2]
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+            # Preprocess for edge detection
+            blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+            edges = cv2.Canny(blurred, 50, 150)
+
+            # Find contours
+            contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+            # Look for rectangular contours with card-like aspect ratio
+            for contour in sorted(contours, key=cv2.contourArea, reverse=True):
+                area = cv2.contourArea(contour)
+                if area < (width * height * 0.1):  # Minimum 10% of image
+                    continue
+
+                # Approximate polygon
+                epsilon = 0.02 * cv2.arcLength(contour, True)
+                approx = cv2.approxPolyDP(contour, epsilon, True)
+
+                if len(approx) != 4:
+                    continue
+
+                # Get corner points
+                pts = approx.reshape(4, 2).astype(np.float32)
+
+                # Calculate aspect ratio
+                rect = cv2.minAreaRect(contour)
+                card_width, card_height = rect[1]
+                if card_height > card_width:
+                    card_width, card_height = card_height, card_width
+
+                aspect_ratio = card_width / (card_height + 1e-6)
+
+                # Check if aspect ratio matches Thai ID card
+                if not (THAI_ID_ASPECT_RATIO_MIN <= aspect_ratio <= THAI_ID_ASPECT_RATIO_MAX):
+                    continue
+
+                # Order points for perspective transform (top-left, top-right, bottom-right, bottom-left)
+                def order_points(pts):
+                    rect = np.zeros((4, 2), dtype="float32")
+                    s = pts.sum(axis=1)
+                    rect[0] = pts[np.argmin(s)]
+                    rect[2] = pts[np.argmax(s)]
+                    diff = np.diff(pts, axis=1)
+                    rect[1] = pts[np.argmin(diff)]
+                    rect[3] = pts[np.argmax(diff)]
+                    return rect
+
+                ordered_pts = order_points(pts)
+
+                # Perspective transform
+                dst_pts = np.array([
+                    [0, 0],
+                    [THAI_ID_STANDARD_WIDTH - 1, 0],
+                    [THAI_ID_STANDARD_WIDTH - 1, THAI_ID_STANDARD_HEIGHT - 1],
+                    [0, THAI_ID_STANDARD_HEIGHT - 1]
+                ], dtype=np.float32)
+
+                matrix = cv2.getPerspectiveTransform(ordered_pts, dst_pts)
+                warped = cv2.warpPerspective(img, matrix, (THAI_ID_STANDARD_WIDTH, THAI_ID_STANDARD_HEIGHT))
+
+                return warped
+
+            # No suitable card detected
+            return None
+
+        except Exception as e:
+            logger.debug(f"Card detection failed: {e}")
+            return None
+
+    @staticmethod
+    def extract_from_roi(image: np.ndarray, roi_name: str, roi_coords: Tuple[int, int, int, int],
+                         lang: str = "tha+eng", psm: int = 7) -> Tuple[str, float]:
+        """Extract text from specific ROI on image.
+
+        Args:
+            image: Image array (warped card)
+            roi_name: Name of ROI (for logging)
+            roi_coords: (x, y, width, height)
+            lang: Tesseract language
+            psm: Tesseract PSM mode
+
+        Returns:
+            (text, confidence)
+        """
+        try:
+            x, y, w, h = roi_coords
+            roi = image[y:y+h, x:x+w]
+
+            if roi.size == 0:
+                return "", 0.0
+
+            # Preprocess ROI
+            gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY) if len(roi.shape) == 3 else roi
+            denoised = cv2.fastNlMeansDenoising(gray, None, h=10)
+            _, thresh = cv2.threshold(denoised, 150, 255, cv2.THRESH_BINARY)
+
+            # OCR
+            config = f'--psm {psm}'
+            text = pytesseract.image_to_string(thresh, lang=lang, config=config)
+            data = pytesseract.image_to_data(thresh, lang=lang, output_type=Output.DICT, config=config)
+
+            confidences = [int(conf) for conf in data['conf'] if int(conf) > 0]
+            avg_confidence = sum(confidences) / len(confidences) if confidences else 0.0
+            avg_confidence = min(avg_confidence / 100, 1.0)
+
+            return text.strip(), avg_confidence
+
+        except Exception as e:
+            logger.debug(f"ROI extraction failed for {roi_name}: {e}")
+            return "", 0.0
 
     @staticmethod
     def extract_text_with_confidence(image_bytes: bytes, debug: bool = False) -> Tuple[str, float, Dict]:
@@ -447,3 +597,204 @@ class OCRService:
                     pass
 
         return None
+
+    @staticmethod
+    def parse_thai_full_name_from_roi(text: str) -> Tuple[Optional[str], Optional[str]]:
+        """Parse Thai first name and last name from ROI text.
+
+        Handles Thai title patterns and ensures names are valid.
+        """
+        text = OCRService.redact_thai_id_numbers(text.strip().lower())
+        if not text:
+            return None, None
+
+        lines = [line.strip() for line in text.split('\n') if line.strip()]
+        first_name = None
+        last_name = None
+
+        # Try title patterns first
+        titles = ['เด็กหญิง', 'เด็กชาย', 'นางสาว', 'ด.ญ.', 'ด.ช.', 'นาย', 'นาง']
+        for line in lines:
+            for title in sorted(titles, key=len, reverse=True):  # Longest first
+                if title in line:
+                    remaining = line.split(title, 1)[1].strip()
+                    parts = [
+                        p.strip() for p in remaining.split()
+                        if p.strip() and not OCRService._is_noise_word(p) and p.lower() not in FORBIDDEN_WORDS_EXTENDED
+                    ]
+                    if len(parts) >= 2:
+                        return parts[0], parts[1]
+                    elif len(parts) == 1:
+                        return parts[0], None
+
+        # Extract Thai words
+        thai_words = []
+        for line in lines:
+            words = [
+                w.strip() for w in line.split()
+                if w.strip() and not OCRService._is_noise_word(w) and w.lower() not in FORBIDDEN_WORDS_EXTENDED
+            ]
+            words = [w for w in words if any('฀' <= c <= '๿' for c in w)]  # Only Thai
+            thai_words.extend(words)
+
+        if len(thai_words) >= 2:
+            return thai_words[0], thai_words[1]
+        elif len(thai_words) == 1:
+            return thai_words[0], None
+
+        return None, None
+
+    @staticmethod
+    def parse_english_name_from_roi(text: str) -> Optional[str]:
+        """Parse English first or last name from ROI text.
+
+        Removes titles like Mr., Miss, Mrs., etc.
+        """
+        text = text.strip()
+        if not text:
+            return None
+
+        # Remove titles
+        titles = ['Mr.', 'Mrs.', 'Miss', 'Ms.', 'Dr.', 'Prof.']
+        for title in titles:
+            if text.lower().startswith(title.lower()):
+                text = text[len(title):].strip()
+
+        # Get first word (should be single name)
+        words = text.split()
+        if words and len(words[0]) > 1:  # Avoid single characters
+            return words[0]
+
+        return None
+
+    @staticmethod
+    def extract_dob_from_rois(dob_english_text: str, dob_thai_text: str) -> Optional[date]:
+        """Extract date of birth from English or Thai ROI text.
+
+        Prioritizes English format, falls back to Thai.
+        """
+        # Try English first
+        if dob_english_text.strip():
+            result = OCRService.extract_date_of_birth(dob_english_text)
+            if result:
+                return result
+
+        # Try Thai
+        if dob_thai_text.strip():
+            result = OCRService.extract_date_of_birth(dob_thai_text)
+            if result:
+                return result
+
+        return None
+
+    @staticmethod
+    def extract_from_thai_id_template(image_bytes: bytes) -> Dict:
+        """Extract data from Thai ID card using template ROI approach.
+
+        Returns dict with:
+        - success: bool
+        - card_detected: bool
+        - card_warped: bool
+        - extraction_mode: "thai_id_template" or "full_ocr_fallback"
+        - first_name: str or None
+        - last_name: str or None
+        - date_of_birth: date or None
+        - confidence: float (average of all ROIs)
+        - roi_results: dict with individual ROI results
+        - warnings: list
+        """
+        warnings = []
+        roi_results = {}
+        card_detected = False
+        card_warped = False
+
+        try:
+            # Try to detect and warp card
+            warped_card = OCRService.detect_id_card_rectangle(image_bytes)
+            if warped_card is not None:
+                card_detected = True
+                card_warped = True
+            else:
+                warnings.append("ไม่พบกรอบบัตรประชาชน ใช้ OCR แบบเดิมแทน")
+                card_detected = False
+
+            # Extract from ROIs if card was detected and warped
+            if card_warped:
+                # Extract Thai name
+                thai_name_text, thai_name_conf = OCRService.extract_from_roi(
+                    warped_card, "thai_name_line", THAI_ID_CARD_ROIS["thai_name_line"], lang="tha+eng", psm=6
+                )
+                thai_first, thai_last = OCRService.parse_thai_full_name_from_roi(thai_name_text)
+
+                # Extract English names
+                eng_first_text, eng_first_conf = OCRService.extract_from_roi(
+                    warped_card, "english_first_name", THAI_ID_CARD_ROIS["english_first_name"], lang="eng", psm=7
+                )
+                eng_first = OCRService.parse_english_name_from_roi(eng_first_text)
+
+                eng_last_text, eng_last_conf = OCRService.extract_from_roi(
+                    warped_card, "english_last_name", THAI_ID_CARD_ROIS["english_last_name"], lang="eng", psm=7
+                )
+                eng_last = OCRService.parse_english_name_from_roi(eng_last_text)
+
+                # Extract DOB
+                dob_thai_text, dob_thai_conf = OCRService.extract_from_roi(
+                    warped_card, "dob_thai", THAI_ID_CARD_ROIS["dob_thai"], lang="tha+eng", psm=7
+                )
+                dob_eng_text, dob_eng_conf = OCRService.extract_from_roi(
+                    warped_card, "dob_english", THAI_ID_CARD_ROIS["dob_english"], lang="eng", psm=7
+                )
+                dob = OCRService.extract_dob_from_rois(dob_eng_text, dob_thai_text)
+
+                # Store ROI results
+                roi_results = {
+                    "thai_name_line": {"text": OCRService.redact_thai_id_numbers(thai_name_text), "confidence": thai_name_conf},
+                    "english_first_name": {"text": OCRService.redact_thai_id_numbers(eng_first_text), "confidence": eng_first_conf},
+                    "english_last_name": {"text": OCRService.redact_thai_id_numbers(eng_last_text), "confidence": eng_last_conf},
+                    "dob_thai": {"text": OCRService.redact_thai_id_numbers(dob_thai_text), "confidence": dob_thai_conf},
+                    "dob_english": {"text": OCRService.redact_thai_id_numbers(dob_eng_text), "confidence": dob_eng_conf},
+                }
+
+                # Determine final names
+                first_name = thai_first or eng_first
+                last_name = thai_last or eng_last
+
+                if not thai_first and eng_first:
+                    warnings.append("ไม่พบชื่อภาษาไทยจาก OCR ใช้ชื่อภาษาอังกฤษเป็นข้อมูลอ้างอิง กรุณาตรวจสอบ")
+
+                if not dob:
+                    warnings.append("ไม่พบวันเกิดจาก OCR กรุณากรอกเอง")
+
+                # Calculate average confidence
+                confidences = [c for _, v in roi_results.items() if isinstance(v, dict) and (conf := v.get("confidence", 0)) > 0]
+                avg_confidence = sum(confidences) / len(confidences) if confidences else 0.0
+
+                return {
+                    "success": True,
+                    "card_detected": True,
+                    "card_warped": True,
+                    "extraction_mode": "thai_id_template",
+                    "first_name": first_name,
+                    "last_name": last_name,
+                    "date_of_birth": dob,
+                    "confidence": avg_confidence,
+                    "roi_results": roi_results,
+                    "warnings": warnings
+                }
+
+        except Exception as e:
+            logger.warning(f"Thai ID template extraction failed: {e}")
+
+        # Fallback return
+        return {
+            "success": False,
+            "card_detected": card_detected,
+            "card_warped": card_warped,
+            "extraction_mode": "full_ocr_fallback",
+            "first_name": None,
+            "last_name": None,
+            "date_of_birth": None,
+            "confidence": 0.0,
+            "roi_results": roi_results,
+            "warnings": warnings
+        }

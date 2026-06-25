@@ -48,17 +48,34 @@ def process_ocr_file(
             except Exception as e:
                 return None, f"PDF conversion failed: {str(e)}"
 
-        # Extract text with confidence (multiple preprocessing methods tried)
-        ocr_text, confidence, debug_info = OCRService.extract_text_with_confidence(image_bytes)
+        # Try Thai ID card template extraction first
+        template_result = OCRService.extract_from_thai_id_template(image_bytes)
 
-        # Use redacted text from debug info
-        redacted_text = debug_info['ocr_text']
+        if template_result["success"] and template_result["card_warped"]:
+            # Use template extraction results
+            first_name = template_result["first_name"]
+            last_name = template_result["last_name"]
+            date_of_birth = template_result["date_of_birth"]
+            confidence = template_result["confidence"]
+            extraction_mode = "thai_id_template"
+            template_warnings = template_result.get("warnings", [])
+            roi_results = template_result.get("roi_results", {})
 
-        # Extract names
-        first_name, last_name = OCRService.extract_thai_names(redacted_text)
+            # Get full OCR text for fallback/debug
+            ocr_text, _, debug_info = OCRService.extract_text_with_confidence(image_bytes)
+            redacted_text = debug_info['ocr_text']
+        else:
+            # Fallback to full OCR
+            ocr_text, confidence, debug_info = OCRService.extract_text_with_confidence(image_bytes)
+            redacted_text = debug_info['ocr_text']
+            extraction_mode = "full_ocr_fallback"
+            template_warnings = template_result.get("warnings", [])
+            roi_results = {}
 
-        # Extract date of birth
-        date_of_birth = OCRService.extract_date_of_birth(ocr_text)
+            # Extract names from full OCR
+            first_name, last_name = OCRService.extract_thai_names(redacted_text)
+            # Extract date of birth
+            date_of_birth = OCRService.extract_date_of_birth(ocr_text)
 
         # Calculate birth year BE if we have date
         birth_year_be = date_to_birth_year_be(date_of_birth) if date_of_birth else None
@@ -77,8 +94,9 @@ def process_ocr_file(
             date_of_birth
         )
 
-        # Collect warnings
-        warnings = []
+        # Collect warnings (template warnings + validation warnings)
+        warnings = list(template_warnings) if template_warnings else []
+
         if not first_name:
             warnings.append("Could not extract first name from OCR")
         if not last_name:
@@ -111,7 +129,11 @@ def process_ocr_file(
                 ocrText=debug_info['ocr_text'],
                 preprocessingMethod=debug_info['preprocessing_method'],
                 psmMode=debug_info['psm_mode'],
-                confidence=debug_info['confidence']
+                confidence=debug_info['confidence'],
+                extractionMode=extraction_mode,
+                cardDetected=template_result.get("card_detected"),
+                cardWarped=template_result.get("card_warped"),
+                roiResults=roi_results if roi_results else None
             )
         ), None
 

@@ -446,5 +446,91 @@ class TestLowConfidenceHandling:
         assert confidence < 0.5 or text.strip() == ""
 
 
+class TestThaiIDCardDetection:
+    """Test Thai ID card detection and template extraction."""
+
+    def test_card_detection_returns_none_for_invalid_image(self):
+        """Card detection should return None for images without valid ID card."""
+        import cv2
+        import numpy as np
+
+        # Create random noise image
+        img = np.random.randint(0, 256, (480, 640, 3), dtype=np.uint8)
+        _, buffer = cv2.imencode('.jpg', img)
+        image_bytes = buffer.tobytes()
+
+        result = OCRService.detect_id_card_rectangle(image_bytes)
+        assert result is None
+
+    def test_template_extraction_returns_dict_with_required_fields(self):
+        """Template extraction should return dict with all required fields."""
+        import cv2
+        import numpy as np
+
+        # Create blank image
+        img = np.ones((630, 1000, 3), dtype=np.uint8) * 255
+        _, buffer = cv2.imencode('.jpg', img)
+        image_bytes = buffer.tobytes()
+
+        result = OCRService.extract_from_thai_id_template(image_bytes)
+
+        assert isinstance(result, dict)
+        assert "success" in result
+        assert "card_detected" in result
+        assert "card_warped" in result
+        assert "extraction_mode" in result
+        assert "first_name" in result
+        assert "last_name" in result
+        assert "date_of_birth" in result
+        assert "confidence" in result
+        assert "roi_results" in result
+        assert "warnings" in result
+
+
+class TestThaiNameRoiParsing:
+    """Test Thai name parsing from ROI text."""
+
+    def test_parse_thai_name_with_title(self):
+        """Extract Thai name when title is present."""
+        text = "นาย สมชาย วิชัยกุล"
+        first, last = OCRService.parse_thai_full_name_from_roi(text)
+        assert first == "สมชาย"
+        assert last == "วิชัยกุล"
+
+    def test_parse_thai_name_with_nang_sao_title(self):
+        """Extract Thai name with นางสาว title."""
+        text = "นางสาว ฉัตรวิภา คำวัฒนา"
+        first, last = OCRService.parse_thai_full_name_from_roi(text)
+        assert first == "ฉัตรวิภา"
+        assert last == "คำวัฒนา"
+
+    def test_parse_thai_name_rejects_forbidden_words(self):
+        """Thai name parsing should reject forbidden words."""
+        text = "บัตรประชาชน สมชาย"
+        first, last = OCRService.parse_thai_full_name_from_roi(text)
+        # Should not extract "บัตรประชาชน" as name
+        assert first is None or first != "บัตรประชาชน"
+
+    def test_parse_english_name_removes_title(self):
+        """English name parsing should remove titles."""
+        text = "Mr. John Smith"
+        result = OCRService.parse_english_name_from_roi(text)
+        assert result == "John"
+
+    def test_extract_dob_from_english_roi_first(self):
+        """DOB extraction should prioritize English format."""
+        eng_text = "23 Sep. 2009"
+        thai_text = "23 ก.ย. 2552"
+        result = OCRService.extract_dob_from_rois(eng_text, thai_text)
+        assert result == date(2009, 9, 23)
+
+    def test_extract_dob_from_thai_roi_fallback(self):
+        """DOB extraction should fallback to Thai format."""
+        eng_text = ""
+        thai_text = "23 ก.ย. 2552"
+        result = OCRService.extract_dob_from_rois(eng_text, thai_text)
+        assert result == date(2009, 9, 23)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

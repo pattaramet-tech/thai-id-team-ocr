@@ -413,6 +413,52 @@ git push -u origin feature/feature-name
 - No data is sent to external servers
 - SQLite database is stored locally and can be backed up/deleted
 
+## 📸 Thai ID Card Template OCR (Smart Mode)
+
+The OCR system uses **Thai ID card template detection** for better accuracy:
+
+### How It Works
+1. **Card Detection**: System automatically detects the Thai ID card rectangle in your image
+2. **Perspective Warp**: Card is aligned to a standard orientation (1000×630 pixels)
+3. **ROI Extraction**: Specific regions of interest are extracted:
+   - Thai full name line (ชื่อตัวและชื่อสกุล)
+   - English first name and last name
+   - Date of birth (both Thai and English formats)
+4. **Smart Parsing**: Names and dates are extracted from the locked regions, avoiding noise text
+
+### Best Practices for Card Photography
+- **Full Card Visible**: Ensure entire ID card is in frame
+- **Good Lighting**: Bright, even lighting without shadows or glare
+- **Straight Angle**: Card should be roughly parallel to camera (not tilted)
+- **Clear Focus**: Image should be sharp and in focus
+- **Minimum Resolution**: At least 300×300 pixels per card
+
+### What Gets Extracted
+- ✅ First name (from Thai name line)
+- ✅ Last name (from Thai name line)
+- ✅ Date of birth (Thai or English format)
+- ✅ Age group eligibility check
+
+### What's NOT Extracted
+- ❌ ID number (redacted automatically)
+- ❌ Address (outside ROI)
+- ❌ Photo (outside ROI)
+- ❌ Barcode (outside ROI)
+
+### Fallback Behavior
+If the system **cannot detect the card**:
+- Falls back to full-image OCR
+- Shows warning: "ไม่พบกรอบบัตรประชาชน ใช้ OCR แบบเดิมแทน"
+- Still extracts names and dates, but with lower accuracy
+- Manual verification is more important in this case
+
+### Debug Information
+Each OCR result includes debug info showing:
+- Whether card was detected and warped
+- Extraction mode (thai_id_template or full_ocr_fallback)
+- Individual ROI confidence scores
+- Redacted OCR text for troubleshooting
+
 ## 📖 Documentation
 
 | Document | Purpose |
