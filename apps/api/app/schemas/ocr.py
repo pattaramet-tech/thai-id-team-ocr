@@ -1,6 +1,13 @@
 from pydantic import BaseModel
 from datetime import date
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
+
+class OCRDebugInfo(BaseModel):
+    """Debug information about OCR processing."""
+    ocrText: str  # Redacted OCR output for display/copying
+    preprocessingMethod: str  # Which preprocessing method was best
+    psmMode: int  # Tesseract PSM mode used
+    confidence: float
 
 class OCRPreviewResponse(BaseModel):
     """OCR preview result before saving to database."""
@@ -15,6 +22,7 @@ class OCRPreviewResponse(BaseModel):
     eligibilityStatus: str  # eligible | over_age | unknown
     eligibilityNote: Optional[str]
     warnings: List[str]  # Warnings about OCR quality or missing data
+    debugInfo: Optional[OCRDebugInfo] = None  # For debugging/support
 
     class Config:
         from_attributes = True
@@ -35,6 +43,7 @@ class OCRBatchItemResponse(BaseModel):
     eligibilityStatus: Optional[str] = None  # eligible | over_age | unknown
     eligibilityNote: Optional[str] = None
     warnings: Optional[List[str]] = None
+    debugInfo: Optional[OCRDebugInfo] = None  # For debugging/support
 
     class Config:
         from_attributes = True

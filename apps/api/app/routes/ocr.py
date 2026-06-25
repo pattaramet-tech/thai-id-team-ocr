@@ -6,7 +6,7 @@ from app.models import Player, Team
 from app.services.ocr import OCRService
 from app.services.eligibility import date_to_birth_year_be, check_eligibility_for_player
 from app.services.duplicates import DuplicateDetectionService
-from app.schemas.ocr import OCRPreviewResponse, OCRBatchResponse, OCRBatchItemResponse
+from app.schemas.ocr import OCRPreviewResponse, OCRBatchResponse, OCRBatchItemResponse, OCRDebugInfo
 from datetime import datetime, date
 from typing import Optional, Tuple
 
@@ -48,11 +48,11 @@ def process_ocr_file(
             except Exception as e:
                 return None, f"PDF conversion failed: {str(e)}"
 
-        # Extract text with confidence
-        ocr_text, confidence = OCRService.extract_text_with_confidence(image_bytes)
+        # Extract text with confidence (multiple preprocessing methods tried)
+        ocr_text, confidence, debug_info = OCRService.extract_text_with_confidence(image_bytes)
 
-        # Redact ID numbers
-        redacted_text = OCRService.redact_thai_id_numbers(ocr_text)
+        # Use redacted text from debug info
+        redacted_text = debug_info['ocr_text']
 
         # Extract names
         first_name, last_name = OCRService.extract_thai_names(redacted_text)
@@ -106,7 +106,13 @@ def process_ocr_file(
             confidence=confidence,
             eligibilityStatus=eligibility_result["status"],
             eligibilityNote=eligibility_result["note"],
-            warnings=warnings
+            warnings=warnings,
+            debugInfo=OCRDebugInfo(
+                ocrText=debug_info['ocr_text'],
+                preprocessingMethod=debug_info['preprocessing_method'],
+                psmMode=debug_info['psm_mode'],
+                confidence=debug_info['confidence']
+            )
         ), None
 
     except Exception as e:

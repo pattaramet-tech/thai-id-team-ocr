@@ -1,11 +1,15 @@
 import re
 import cv2
 import numpy as np
+import logging
 from datetime import datetime, date
 from io import BytesIO
 import pytesseract
+from pytesseract import Output
 from typing import Optional, Tuple, Dict, List
 from pdf2image import convert_from_bytes
+
+logger = logging.getLogger(__name__)
 
 class OCRService:
     @staticmethod
@@ -28,41 +32,124 @@ class OCRService:
             raise Exception(f"PDF conversion failed: {str(e)}")
 
     @staticmethod
-    def preprocess_image(image_bytes: bytes) -> np.ndarray:
-        """Preprocess image for better OCR accuracy."""
+    def preprocess_image(image_bytes: bytes, method: str = "default") -> np.ndarray:
+        """Preprocess image with different methods for better OCR accuracy.
+
+        Methods:
+        - default: grayscale + denoise + threshold
+        - resize2x: resize 2x + default
+        - resize3x: resize 3x + default
+        - adaptive: grayscale + denoise + adaptive threshold
+        - contrast: grayscale + contrast enhancement
+        - sharpen: grayscale + sharpening
+        """
         nparr = np.frombuffer(image_bytes, np.uint8)
         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        denoised = cv2.fastNlMeansDenoising(gray, None, h=10)
-        _, thresh = cv2.threshold(denoised, 150, 255, cv2.THRESH_BINARY)
 
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
-        processed = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+        if method in ["resize2x", "resize3x"]:
+            scale = 2 if method == "resize2x" else 3
+            gray = cv2.resize(gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
 
-        return processed
+        if method == "adaptive":
+            denoised = cv2.fastNlMeansDenoising(gray, None, h=10)
+            return cv2.adaptiveThreshold(denoised, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                       cv2.THRESH_BINARY, 11, 2)
+        elif method == "contrast":
+            lab = cv2.cvtColor(cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR), cv2.COLOR_BGR2LAB)
+            l, a, b = cv2.split(lab)
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            l = clahe.apply(l)
+            return cv2.merge([l, a, b])
+        elif method == "sharpen":
+            denoised = cv2.fastNlMeansDenoising(gray, None, h=10)
+            kernel = np.array([[-1,-1,-1], [-1, 9,-1], [-1,-1,-1]])
+            return cv2.filter2D(denoised, -1, kernel)
+        else:  # default, resize2x, resize3x
+            denoised = cv2.fastNlMeansDenoising(gray, None, h=10)
+            _, thresh = cv2.threshold(denoised, 150, 255, cv2.THRESH_BINARY)
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+            return cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
 
     @staticmethod
-    def extract_text_with_confidence(image_bytes: bytes) -> Tuple[str, float]:
-        """Extract text from image using Tesseract with confidence score."""
-        try:
-            processed_img = OCRService.preprocess_image(image_bytes)
+    def extract_text_with_confidence(image_bytes: bytes, debug: bool = False) -> Tuple[str, float, Dict]:
+        """Extract text from image using multiple preprocessing methods and PSM modes.
 
-            data = pytesseract.image_to_data(
-                processed_img,
-                lang='tha+eng',
-                output_type=pytesseract.Output.DICT,
-                config='--psm 6'
-            )
+        Tries multiple preprocessing methods and Tesseract PSM modes, returns the best result.
 
-            confidences = [int(conf) for conf in data['conf'] if int(conf) > 0]
-            avg_confidence = sum(confidences) / len(confidences) if confidences else 0.0
-            avg_confidence = min(avg_confidence / 100, 1.0)
+        Args:
+            image_bytes: Raw image data
+            debug: If True, returns debug info in the dict
 
-            text = '\n'.join(data['text'])
-            return text, avg_confidence
-        except Exception as e:
-            raise Exception(f"OCR failed: {str(e)}")
+        Returns:
+            Tuple of (extracted_text, confidence_score, debug_info)
+        """
+        preprocessing_methods = ["default", "resize2x", "resize3x", "adaptive", "contrast", "sharpen"]
+        psm_modes = [6, 11, 12]
+        best_result = None
+        best_score = 0.0
+
+        for method in preprocessing_methods:
+            try:
+                processed = OCRService.preprocess_image(image_bytes, method)
+
+                for psm in psm_modes:
+                    try:
+                        config = f'--psm {psm}'
+                        data = pytesseract.image_to_data(
+                            processed,
+                            lang='tha+eng',
+                            output_type=Output.DICT,
+                            config=config
+                        )
+
+                        confidences = [int(conf) for conf in data['conf'] if int(conf) > 0]
+                        avg_confidence = sum(confidences) / len(confidences) if confidences else 0.0
+                        avg_confidence = min(avg_confidence / 100, 1.0)
+
+                        text = '\n'.join(data['text']).strip()
+
+                        # Calculate score based on confidence and content
+                        thai_char_count = sum(1 for c in text if '฀' <= c <= '๿')
+                        has_content = len(text) > 0 and thai_char_count > 0
+                        score = avg_confidence if has_content else 0
+
+                        if score > best_score:
+                            best_score = score
+                            best_result = {
+                                'text': text,
+                                'confidence': avg_confidence,
+                                'method': method,
+                                'psm': psm
+                            }
+                    except Exception as e:
+                        logger.debug(f"OCR with PSM {psm} failed: {e}")
+                        continue
+            except Exception as e:
+                logger.debug(f"Preprocessing with method {method} failed: {e}")
+                continue
+
+        if best_result is None:
+            best_result = {
+                'text': '',
+                'confidence': 0.0,
+                'method': 'none',
+                'psm': 6
+            }
+
+        text = best_result['text']
+        confidence = best_result['confidence']
+
+        # Create debug info with redacted text for display
+        redacted_text = OCRService.redact_thai_id_numbers(text)
+        debug_info = {
+            'ocr_text': redacted_text,
+            'preprocessing_method': best_result['method'],
+            'psm_mode': best_result['psm'],
+            'confidence': confidence
+        }
+
+        return text, confidence, debug_info
 
     @staticmethod
     def redact_thai_id_numbers(text: str) -> str:

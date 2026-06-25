@@ -452,6 +452,149 @@ pip install -r requirements.txt
 - **Linux/macOS**: Use package manager as shown above
 - **Workaround**: Use JPG/PNG files instead (OCR still works without PDF support)
 
+## 🔍 When OCR Doesn't Work - Troubleshooting Guide
+
+Sometimes OCR results are inaccurate or missing data. Here's how to troubleshoot:
+
+### Problem: Names Not Extracting (Empty First/Last Name)
+
+**Why it happens:**
+- Text in ID/document is blurry or low-quality
+- Unusual name format or font the OCR engine doesn't recognize
+- Text color/background contrast is poor
+- Image is too small (less than 100x100 pixels)
+
+**How to fix:**
+1. **Check Image Quality**
+   - Ensure image is clear, well-lit, and in focus
+   - Scan at higher resolution (300 DPI minimum)
+   - JPG/PNG format works best; PDF requires Poppler
+
+2. **Improve Lighting**
+   - Avoid shadows and glare on the ID card
+   - Use natural daylight or bright indoor lighting
+   - No flash reflection on the document
+
+3. **Adjust Image Size**
+   - Image should be at least 300x300 pixels
+   - Crop to show only the relevant text area
+   - Avoid excessive empty space
+
+4. **Manual Entry**
+   - If OCR fails completely, you can manually enter names
+   - Click on the name fields in the review screen and type in the correct names
+   - The system will accept manually-entered names
+
+### Problem: Low Confidence Score (Warning: "Low OCR confidence")
+
+**Why it happens:**
+- Text extraction succeeded but the OCR engine is uncertain about accuracy
+- Confidence below 70% shows a warning but doesn't block entry
+- Common with handwritten text or poor image quality
+
+**How to fix:**
+1. **Verify Extracted Names**
+   - Even with low confidence, OCR result may be correct
+   - Compare with original ID/document
+   - Only correct if names are actually wrong
+
+2. **Re-upload Better Image**
+   - Recapture image with better lighting/focus
+   - Larger, clearer images improve confidence
+   - Each upload tries multiple preprocessing techniques automatically
+
+3. **Accept with Caution**
+   - Low confidence warnings let you save the result
+   - You can always edit names later in the Review page
+   - Confidence is an indicator, not a blocker
+
+### Problem: Date of Birth Not Extracting
+
+**Why it happens:**
+- Date missing from OCR: "Could not extract date of birth"
+- Common if ID doesn't have clearly visible birthdate
+- Special date formats may not be recognized
+
+**How to fix:**
+1. **Check Image Contains Date**
+   - Verify birthdate is visible in image
+   - Must have day, month, year format
+   - Supported formats:
+     - Thai: `23 ก.ย. 2552` or `23 กย 2552` (with/without dots)
+     - English: `23 September 2009` or `Sep. 23 2009`
+     - ISO: `2009-09-23` or Slash: `23/09/2009`
+
+2. **Manual Entry**
+   - Click the date field in review screen
+   - Select date from calendar picker
+   - Manually type if calendar doesn't work
+
+3. **Thai Date Tips**
+   - Buddhist Era dates (BE) work: 2552 BE = 2009 AD
+   - Accepted month abbreviations:
+     - Thai: ม.ค., กพ., มีค., เมย., พค., มิย., กค., สค., กย., ตค., พย., ธค.
+     - Also: มค, กพ, มีค, เมย, พค, มิย, กค, สค, กย, ตค, พย, ธค (without dots)
+
+### Problem: ID Number Shows in Debug Info
+
+**Why it happens:**
+- Debug info shows redacted text (with `[REDACTED_ID]` placeholder)
+- This is for troubleshooting purposes only
+- ID numbers are never stored in the database
+
+**How to use:**
+1. **View Debug Info**
+   - Click "Show Debug Info" in OCR result (if available)
+   - Shows what the OCR engine extracted
+   - Helps diagnose why name extraction failed
+
+2. **Copy Redacted Text**
+   - Debug info displays redacted version
+   - Safe to share for support/troubleshooting
+   - Original ID numbers remain private
+
+3. **Privacy Assurance**
+   - No ID numbers are stored in database
+   - No ID numbers are exported to Excel
+   - Debug info is temporary (not persisted)
+
+### Problem: Too Many Names Being Extracted (Multiple Names as One)
+
+**Why it happens:**
+- OCR extracted text from multiple lines as single name
+- Name fields may contain suffix or title words
+- Mixed text from document labels
+
+**How to fix:**
+1. **Edit Names**
+   - Review screen shows extracted names
+   - Click to edit individual fields
+   - Remove extra words/suffixes
+
+2. **Expected Extraction**
+   - First name: Given name (ชื่อ)
+   - Last name: Family name (นามสกุล)
+   - Title like "นาย" or "นางสาว" is removed automatically
+
+### Enabling Debug Mode for Support
+
+If problems persist:
+
+1. **Export Debug Info**
+   - After upload, click "Show Debug Info"
+   - Copy the redacted OCR text
+   - Note the preprocessing method and confidence score
+
+2. **Share for Support**
+   - Include which image file caused issue
+   - Share debug info (redacted text only)
+   - Describe what information is missing/wrong
+
+3. **Technical Details**
+   - Preprocessing methods: default, resize2x, resize3x, adaptive, contrast, sharpen
+   - Tesseract PSM modes: 6 (block), 11 (sparse text), 12 (raw line)
+   - System tries all combinations and picks best result
+
 ## 📊 Project Statistics
 
 - **Total Files**: 50+
