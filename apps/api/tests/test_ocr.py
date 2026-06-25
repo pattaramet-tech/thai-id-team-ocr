@@ -531,6 +531,93 @@ class TestThaiNameRoiParsing:
         result = OCRService.extract_dob_from_rois(eng_text, thai_text)
         assert result == date(2009, 9, 23)
 
+    def test_parse_thai_rejects_short_fragments(self):
+        """Thai name parsing should reject short OCR fragments."""
+        text = "ชา ชน ปร"
+        first, last = OCRService.parse_thai_full_name_from_roi(text)
+        # All words are too short (≤2 chars), should return None
+        assert first is None
+        assert last is None
+
+    def test_parse_thai_rejects_single_word_fragments(self):
+        """Reject single Thai word that's just a fragment."""
+        text = "บัต"
+        first, last = OCRService.parse_thai_full_name_from_roi(text)
+        assert first is None
+        assert last is None
+
+    def test_parse_thai_rejects_short_fragments_with_forbidden_word(self):
+        """Reject short fragments even with forbidden words."""
+        text = "ประชาชน"
+        first, last = OCRService.parse_thai_full_name_from_roi(text)
+        # ประชาชน is forbidden, should return None
+        assert first is None
+        assert last is None
+
+    def test_parse_thai_accepts_long_names_without_title(self):
+        """Accept Thai names longer than 2 chars even without title."""
+        text = "สมชาย วิชัยกุล"
+        first, last = OCRService.parse_thai_full_name_from_roi(text)
+        assert first == "สมชาย"
+        assert last == "วิชัยกุล"
+
+    def test_parse_thai_with_short_title_still_works(self):
+        """Short names are OK when preceded by clear title."""
+        text = "นาย ดี ใจ"
+        first, last = OCRService.parse_thai_full_name_from_roi(text)
+        # Title allows short names
+        assert first == "ดี"
+        assert last == "ใจ"
+
+
+class TestThaiIDTemplateExtraction:
+    """Test Thai ID template extraction workflow and confidence calculation."""
+
+    def test_template_extraction_calculates_confidence_without_error(self):
+        """Regression: confidence calculation should not raise NameError."""
+        import cv2
+        import numpy as np
+
+        # Create test image
+        img = np.ones((630, 1000, 3), dtype=np.uint8) * 255
+        _, buffer = cv2.imencode('.jpg', img)
+        image_bytes = buffer.tobytes()
+
+        # This should not raise NameError about undefined 'c'
+        result = OCRService.extract_from_thai_id_template(image_bytes)
+        assert isinstance(result, dict)
+        assert "confidence" in result
+        assert isinstance(result["confidence"], float)
+
+    def test_template_extraction_average_confidence_calculated(self):
+        """Average confidence should be calculated from ROI confidences."""
+        import cv2
+        import numpy as np
+
+        img = np.ones((630, 1000, 3), dtype=np.uint8) * 255
+        _, buffer = cv2.imencode('.jpg', img)
+        image_bytes = buffer.tobytes()
+
+        result = OCRService.extract_from_thai_id_template(image_bytes)
+
+        # Confidence should be a valid float
+        assert 0.0 <= result["confidence"] <= 1.0
+
+    def test_template_extraction_includes_roi_results(self):
+        """Template extraction should include ROI results in response."""
+        import cv2
+        import numpy as np
+
+        img = np.ones((630, 1000, 3), dtype=np.uint8) * 255
+        _, buffer = cv2.imencode('.jpg', img)
+        image_bytes = buffer.tobytes()
+
+        result = OCRService.extract_from_thai_id_template(image_bytes)
+
+        # When card not detected, roi_results should be empty dict
+        if not result.get("card_warped"):
+            assert isinstance(result["roi_results"], dict)
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -33,7 +33,9 @@ FORBIDDEN_WORDS_EXTENDED = {
     "ประชาชน", "ประจำตัว", "เลขประจำตัว", "บัตรประชาชน", "ไทย",
     "Thai", "National", "ID", "Card", "Identification", "Number",
     "Date", "Birth", "Issue", "Expiry", "ศาสนา", "ที่อยู่",
-    "Address", "Sex", "เพศ", "สัญชาติ", "Nationality"
+    "Address", "Sex", "เพศ", "สัญชาติ", "Nationality",
+    # Common OCR fragments from ID card text
+    "ชา", "ชน", "ปร", "บัต", "ตร", "เลข", "ประ", "บ", "ร", "ก"
 }
 
 class OCRService:
@@ -603,6 +605,7 @@ class OCRService:
         """Parse Thai first name and last name from ROI text.
 
         Handles Thai title patterns and ensures names are valid.
+        Rejects short tokens (≤2 chars) unless they come after a clear title.
         """
         text = OCRService.redact_thai_id_numbers(text.strip().lower())
         if not text:
@@ -612,7 +615,7 @@ class OCRService:
         first_name = None
         last_name = None
 
-        # Try title patterns first
+        # Try title patterns first (titles allow short names)
         titles = ['เด็กหญิง', 'เด็กชาย', 'นางสาว', 'ด.ญ.', 'ด.ช.', 'นาย', 'นาง']
         for line in lines:
             for title in sorted(titles, key=len, reverse=True):  # Longest first
@@ -627,14 +630,15 @@ class OCRService:
                     elif len(parts) == 1:
                         return parts[0], None
 
-        # Extract Thai words
+        # Extract Thai words (without title - reject short tokens)
         thai_words = []
         for line in lines:
             words = [
                 w.strip() for w in line.split()
                 if w.strip() and not OCRService._is_noise_word(w) and w.lower() not in FORBIDDEN_WORDS_EXTENDED
             ]
-            words = [w for w in words if any('฀' <= c <= '๿' for c in w)]  # Only Thai
+            # Only keep Thai words that are longer than 2 characters (reject OCR fragments)
+            words = [w for w in words if any('฀' <= c <= '๿' for c in w) and len(w) > 2]
             thai_words.extend(words)
 
         if len(thai_words) >= 2:
@@ -766,7 +770,7 @@ class OCRService:
                     warnings.append("ไม่พบวันเกิดจาก OCR กรุณากรอกเอง")
 
                 # Calculate average confidence
-                confidences = [c for _, v in roi_results.items() if isinstance(v, dict) and (conf := v.get("confidence", 0)) > 0]
+                confidences = [v.get("confidence", 0) for _, v in roi_results.items() if isinstance(v, dict) and v.get("confidence", 0) > 0]
                 avg_confidence = sum(confidences) / len(confidences) if confidences else 0.0
 
                 return {
