@@ -58,6 +58,95 @@ FORBIDDEN_WORDS_EXTENDED = {
     "ชา", "ชน", "ปร", "บัต", "ตร", "เลข", "ประ", "บ", "ร", "ก"
 }
 
+
+def serialize_field_candidate(candidate: FieldCandidate) -> Dict:
+    """Serialize FieldCandidate dataclass to plain dict for JSON."""
+    value = candidate.value
+
+    # Convert date to ISO string
+    if isinstance(value, date):
+        value = value.isoformat()
+    # Convert tuple (first, last) to dict for Thai names
+    elif isinstance(value, tuple) and len(value) == 2:
+        first, last = value
+        value = {"first": first, "last": last}
+
+    return {
+        "fieldName": candidate.fieldName,
+        "value": value,
+        "rawText": candidate.rawText,
+        "normalizedText": candidate.normalizedText,
+        "source": candidate.source,
+        "templateVersion": candidate.templateVersion,
+        "roiName": candidate.roiName,
+        "confidence": float(candidate.confidence),
+        "score": float(candidate.score),
+        "parser": candidate.parser,
+        "warnings": candidate.warnings
+    }
+
+
+def serialize_field_candidates(field_candidates: Dict[str, List[FieldCandidate]]) -> Dict[str, List[Dict]]:
+    """Serialize all field candidates to plain dicts."""
+    return {
+        field_name: [serialize_field_candidate(c) for c in candidates]
+        for field_name, candidates in field_candidates.items()
+    }
+
+
+def get_selected_candidates_with_preset(field_candidates: Dict[str, List[FieldCandidate]],
+                                       first_name: Optional[str],
+                                       last_name: Optional[str],
+                                       dob: Optional[date]) -> Tuple[Dict[str, Dict], str]:
+    """Get selected candidates and determine which ROI preset was used.
+
+    Returns:
+        (selected_candidates_dict, roi_preset_used)
+    """
+    selected = {}
+
+    # Find which candidate was selected for each field
+    for field_name, candidates in field_candidates.items():
+        for candidate in candidates:
+            # Match by value
+            if field_name == "thai_full_name" and isinstance(candidate.value, tuple):
+                c_first, c_last = candidate.value
+                if c_first == first_name and c_last == last_name:
+                    selected[field_name] = serialize_field_candidate(candidate)
+                    break
+            elif field_name == "english_first_name" and candidate.value == first_name:
+                selected[field_name] = serialize_field_candidate(candidate)
+                break
+            elif field_name == "english_last_name" and candidate.value == last_name:
+                selected[field_name] = serialize_field_candidate(candidate)
+                break
+            elif field_name in ["dob_thai", "dob_english"] and candidate.value == dob:
+                selected[field_name] = serialize_field_candidate(candidate)
+                break
+
+    # Determine ROI preset used (prefer DOB or most common among selected)
+    roi_preset = "v1"  # Default
+    if selected:
+        # Prefer DOB version since it's most critical
+        for field_name in ["dob_english", "dob_thai"]:
+            if field_name in selected:
+                preset = selected[field_name].get("templateVersion", "").replace("template_", "")
+                if preset:
+                    roi_preset = preset
+                    break
+
+        # If no DOB, use most common version from selected fields
+        if roi_preset == "v1":
+            versions = [c.get("templateVersion", "template_v1").replace("template_", "")
+                       for c in selected.values()]
+            if versions:
+                # Count occurrences, pick most common
+                from collections import Counter
+                roi_preset = Counter(versions).most_common(1)[0][0]
+
+    return selected, roi_preset
+
+
 class OCRService:
     @staticmethod
     def pdf_to_image_bytes(pdf_bytes: bytes) -> bytes:
@@ -1186,17 +1275,13 @@ class OCRService:
                 # Select best candidates for each field
                 first_name, last_name, dob = OCRService.select_best_fields(field_candidates)
 
-                # Prepare debug info with candidates
-                candidate_debug = {}
-                for field_name, candidates in field_candidates.items():
-                    if candidates:
-                        best = candidates[0]  # Already sorted by score
-                        candidate_debug[field_name] = {
-                            "value": str(best.value),
-                            "confidence": best.confidence,
-                            "score": best.score,
-                            "templateVersion": best.templateVersion
-                        }
+                # Get selected candidates and actual ROI preset used
+                selected_candidates, roi_preset_used = get_selected_candidates_with_preset(
+                    field_candidates, first_name, last_name, dob
+                )
+
+                # Serialize field candidates for JSON response
+                serialized_candidates = serialize_field_candidates(field_candidates)
 
                 # Calculate average confidence from all candidates
                 all_confidences = []
@@ -1207,13 +1292,19 @@ class OCRService:
 
                 avg_confidence = sum(all_confidences) / len(all_confidences) if all_confidences else 0.0
 
-                # Check for missing fields
+                # Build review reasons for missing/weak fields
+                review_reasons = []
                 if not first_name:
+                    review_reasons.append("MISSING_FIRST_NAME")
                     warnings.append("ไม่พบชื่อจริง กรุณากรอกเอง")
                 if not last_name:
+                    review_reasons.append("MISSING_LAST_NAME")
                     warnings.append("ไม่พบนามสกุล กรุณากรอกเอง")
                 if not dob:
+                    review_reasons.append("MISSING_DATE_OF_BIRTH")
                     warnings.append("ไม่พบวันเกิด กรุณากรอกเอง")
+                if avg_confidence < 0.7:
+                    review_reasons.append("LOW_OCR_CONFIDENCE")
 
                 return {
                     "success": True,
@@ -1221,14 +1312,15 @@ class OCRService:
                     "card_warped": True,
                     "extraction_mode": extraction_mode,
                     "card_like_fallback_used": card_like_fallback_used,
-                    "roi_preset": "v2" if card_like_fallback_used else "v1",
+                    "roi_preset": roi_preset_used,  # Actual preset from selected candidates
                     "first_name": first_name,
                     "last_name": last_name,
-                    "date_of_birth": dob,
+                    "date_of_birth": dob.isoformat() if dob else None,  # Serialize date
                     "confidence": avg_confidence,
                     "roi_results": roi_results,
-                    "candidate_debug": candidate_debug,
-                    "field_candidates": field_candidates,
+                    "field_candidates": serialized_candidates,
+                    "selected_candidates": selected_candidates,
+                    "review_reasons": review_reasons,
                     "warnings": warnings
                 }
 
@@ -1248,5 +1340,8 @@ class OCRService:
             "date_of_birth": None,
             "confidence": 0.0,
             "roi_results": roi_results,
+            "field_candidates": {},
+            "selected_candidates": {},
+            "review_reasons": ["FULL_OCR_FALLBACK_ONLY"],
             "warnings": warnings
         }

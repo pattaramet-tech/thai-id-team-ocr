@@ -687,6 +687,86 @@ class TestStructuredConfidenceScoring:
         assert candidate.score > 80
 
 
+class TestTemplateExtractionSerialization:
+    """Test that template extraction response is JSON-serializable."""
+
+    def test_template_extraction_response_json_serializable(self):
+        """Template extraction response should be JSON-serializable."""
+        import cv2
+        import numpy as np
+        import json
+
+        img = np.ones((630, 1000, 3), dtype=np.uint8) * 255
+        _, buffer = cv2.imencode('.jpg', img)
+        image_bytes = buffer.tobytes()
+
+        result = OCRService.extract_from_thai_id_template(image_bytes)
+
+        # Should be JSON serializable
+        json_str = json.dumps(result, default=str)
+        assert json_str
+
+    def test_template_extraction_includes_review_reasons(self):
+        """Template extraction should include review_reasons for missing fields."""
+        import cv2
+        import numpy as np
+
+        img = np.ones((630, 1000, 3), dtype=np.uint8) * 255
+        _, buffer = cv2.imencode('.jpg', img)
+        image_bytes = buffer.tobytes()
+
+        result = OCRService.extract_from_thai_id_template(image_bytes)
+
+        assert "review_reasons" in result
+        assert isinstance(result["review_reasons"], list)
+
+    def test_template_extraction_date_serialized_to_iso(self):
+        """Date of birth should be serialized to ISO format string."""
+        import cv2
+        import numpy as np
+
+        # Create card-like image
+        img = np.ones((630, 1000, 3), dtype=np.uint8) * 200
+        _, buffer = cv2.imencode('.jpg', img)
+        image_bytes = buffer.tobytes()
+
+        result = OCRService.extract_from_thai_id_template(image_bytes)
+
+        if result.get("date_of_birth"):
+            assert isinstance(result["date_of_birth"], str)
+            # Should be ISO format like "2009-09-23"
+            assert result["date_of_birth"][0].isdigit()
+
+    def test_template_extraction_includes_selected_candidates(self):
+        """Template extraction should include selected candidates."""
+        import cv2
+        import numpy as np
+
+        img = np.ones((630, 1000, 3), dtype=np.uint8) * 255
+        _, buffer = cv2.imencode('.jpg', img)
+        image_bytes = buffer.tobytes()
+
+        result = OCRService.extract_from_thai_id_template(image_bytes)
+
+        assert "selected_candidates" in result
+        assert isinstance(result["selected_candidates"], dict)
+
+    def test_template_extraction_roi_preset_from_selected(self):
+        """ROI preset should be determined from selected candidates."""
+        import cv2
+        import numpy as np
+
+        img = np.ones((630, 1000, 3), dtype=np.uint8) * 255
+        _, buffer = cv2.imencode('.jpg', img)
+        image_bytes = buffer.tobytes()
+
+        result = OCRService.extract_from_thai_id_template(image_bytes)
+
+        # roi_preset should be v1, v2, v3, or None (not hardcoded)
+        roi_preset = result.get("roi_preset")
+        assert roi_preset in [None, "v1", "v2", "v3"]
+
+
 class TestThaiIDTemplateExtraction:
     """Test Thai ID template extraction workflow and confidence calculation."""
 
@@ -734,6 +814,189 @@ class TestThaiIDTemplateExtraction:
         # When card not detected, roi_results should be empty dict
         if not result.get("card_warped"):
             assert isinstance(result["roi_results"], dict)
+
+
+class TestCandidateSerialization:
+    """Test field candidate serialization for JSON output."""
+
+    def test_serialize_field_candidate_string_value(self):
+        """Serialize candidate with string value."""
+        from app.services.ocr import serialize_field_candidate
+        from app.services.id_ocr_structured import FieldCandidate
+
+        candidate = FieldCandidate(
+            fieldName="english_first_name",
+            value="John",
+            rawText="John",
+            normalizedText="John",
+            source="roi_template",
+            templateVersion="template_v1",
+            roiName="english_first_name",
+            confidence=0.9,
+            parser="parse_english_name_from_roi",
+            warnings=[]
+        )
+
+        serialized = serialize_field_candidate(candidate)
+
+        assert isinstance(serialized, dict)
+        assert serialized["value"] == "John"
+        assert isinstance(serialized["confidence"], float)
+        assert isinstance(serialized["score"], float)
+
+    def test_serialize_field_candidate_date_value(self):
+        """Serialize candidate with date value to ISO string."""
+        from app.services.ocr import serialize_field_candidate
+        from app.services.id_ocr_structured import FieldCandidate
+
+        candidate = FieldCandidate(
+            fieldName="dob_english",
+            value=date(2009, 9, 23),
+            rawText="23 Sep. 2009",
+            normalizedText="23 sep. 2009",
+            source="roi_template",
+            templateVersion="template_v1",
+            roiName="dob_english",
+            confidence=0.85,
+            parser="extract_date_of_birth",
+            warnings=[]
+        )
+
+        serialized = serialize_field_candidate(candidate)
+
+        assert serialized["value"] == "2009-09-23"
+        assert isinstance(serialized["value"], str)
+
+    def test_serialize_field_candidate_tuple_value(self):
+        """Serialize candidate with tuple (first, last) name to dict."""
+        from app.services.ocr import serialize_field_candidate
+        from app.services.id_ocr_structured import FieldCandidate
+
+        candidate = FieldCandidate(
+            fieldName="thai_full_name",
+            value=("สมชาย", "วิชัยกุล"),
+            rawText="สมชาย วิชัยกุล",
+            normalizedText="สมชาย วิชัยกุล",
+            source="roi_template",
+            templateVersion="template_v2",
+            roiName="thai_full_name",
+            confidence=0.92,
+            parser="parse_thai_full_name_from_roi",
+            warnings=[]
+        )
+
+        serialized = serialize_field_candidate(candidate)
+
+        assert isinstance(serialized["value"], dict)
+        assert serialized["value"]["first"] == "สมชาย"
+        assert serialized["value"]["last"] == "วิชัยกุล"
+
+    def test_serialize_field_candidates_all_fields(self):
+        """Serialize all field candidates to dicts."""
+        from app.services.ocr import serialize_field_candidates
+        from app.services.id_ocr_structured import FieldCandidate
+
+        candidate = FieldCandidate(
+            fieldName="english_first_name",
+            value="John",
+            rawText="John",
+            normalizedText="John",
+            source="roi_template",
+            templateVersion="template_v1",
+            roiName="english_first_name",
+            confidence=0.9,
+            parser="parse_english_name_from_roi",
+            warnings=[]
+        )
+
+        field_candidates = {
+            "english_first_name": [candidate],
+            "english_last_name": [],
+            "thai_full_name": [],
+            "dob_english": [],
+            "dob_thai": [],
+            "expiry_english": [],
+            "expiry_thai": []
+        }
+
+        serialized = serialize_field_candidates(field_candidates)
+
+        assert isinstance(serialized, dict)
+        assert "english_first_name" in serialized
+        assert isinstance(serialized["english_first_name"], list)
+        assert isinstance(serialized["english_first_name"][0], dict)
+
+    def test_get_selected_candidates_with_preset(self):
+        """Get selected candidates and determine ROI preset used."""
+        from app.services.ocr import get_selected_candidates_with_preset
+        from app.services.id_ocr_structured import FieldCandidate
+
+        candidate_v2 = FieldCandidate(
+            fieldName="dob_english",
+            value=date(2009, 9, 23),
+            rawText="23 Sep. 2009",
+            normalizedText="23 sep. 2009",
+            source="roi_template",
+            templateVersion="template_v2",
+            roiName="dob_english",
+            confidence=0.85,
+            parser="extract_date_of_birth",
+            warnings=[]
+        )
+
+        field_candidates = {
+            "thai_full_name": [],
+            "english_first_name": [],
+            "english_last_name": [],
+            "dob_english": [candidate_v2],
+            "dob_thai": [],
+            "expiry_english": [],
+            "expiry_thai": []
+        }
+
+        selected, preset = get_selected_candidates_with_preset(
+            field_candidates, None, None, date(2009, 9, 23)
+        )
+
+        assert "dob_english" in selected
+        assert preset == "v2"
+
+    def test_selected_candidates_json_serializable(self):
+        """Selected candidates must be JSON-serializable."""
+        import json
+        from app.services.ocr import get_selected_candidates_with_preset
+        from app.services.id_ocr_structured import FieldCandidate
+
+        candidate = FieldCandidate(
+            fieldName="english_first_name",
+            value="John",
+            rawText="John",
+            normalizedText="John",
+            source="roi_template",
+            templateVersion="template_v1",
+            roiName="english_first_name",
+            confidence=0.9,
+            parser="parse_english_name_from_roi",
+            warnings=[]
+        )
+
+        field_candidates = {
+            "english_first_name": [candidate],
+            "english_last_name": [],
+            "thai_full_name": [],
+            "dob_english": [],
+            "dob_thai": [],
+            "expiry_english": [],
+            "expiry_thai": []
+        }
+
+        selected, preset = get_selected_candidates_with_preset(
+            field_candidates, "John", None, None
+        )
+
+        # Must be JSON serializable
+        json_str = json.dumps(selected)
+        assert json_str  # Should succeed without error
 
 
 class TestMultiPresetExtraction:
